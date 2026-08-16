@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: devvault
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/devvault
+    username: devvault
+    password: devvault_dev
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate   # Hibernate nunca crea/modifica el esquema, solo valida contra las migraciones
+    properties:
+      hibernate:
+        format_sql: true
+    show-sql: true          # útil en dev, desactivar (o bajar a false) antes de producción
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+server:
+  port: 8080
+
+logging:
+  level:
+    org.flywaydb: INFO
+    org.hibernate.SQL: DEBUG
