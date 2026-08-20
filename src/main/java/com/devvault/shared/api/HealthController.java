@@ -1,9 +1,8 @@
-package com.devvault.devvault.shared.api;
+package com.devvault.shared.api;
 
 import java.time.Instant;
 import javax.sql.DataSource;
 import java.util.Map;
-
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;

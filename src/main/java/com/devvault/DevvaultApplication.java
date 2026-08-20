@@ -1,4 +1,4 @@
-package com.devvault.devvault;
+package com.devvault;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
