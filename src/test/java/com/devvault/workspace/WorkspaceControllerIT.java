@@ -16,6 +16,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.devvault.workspace.application.dto.CreatedWorkspaceRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -56,7 +57,7 @@ class WorkspaceControllerIT {
      * @throws Exception
      */
     @Test
-    void ShouldCreateWorkspaceWithValidPath() throws Exception {
+    void shouldCreateWorkspaceWithValidPath() throws Exception {
         String tempDir = Files.createTempDirectory("devvault-test").toString();
         CreatedWorkspaceRequest request = new CreatedWorkspaceRequest("My Workspace", tempDir);
 
@@ -77,7 +78,7 @@ class WorkspaceControllerIT {
      * @throws Exception
      */
     @Test
-    void ShouldRejectNonExistentPath() throws Exception {
+    void shouldRejectNonExistentPath() throws Exception {
         CreatedWorkspaceRequest request = new CreatedWorkspaceRequest("Invalid Workspace", "/non/existent/path");
 
         mockMvc.perform(post("/api/v1/workspaces")
@@ -98,7 +99,7 @@ class WorkspaceControllerIT {
      * @throws Exception
      */
     @Test
-    void ShouldRejectDuplicatePath() throws Exception {
+    void shouldRejectDuplicatePath() throws Exception {
         String tempDir = Files.createTempDirectory("devvault-test-duplicate").toString();
         CreatedWorkspaceRequest request = new CreatedWorkspaceRequest("Duplicate Workspace", tempDir);
         
@@ -122,10 +123,35 @@ class WorkspaceControllerIT {
      * @throws Exception
      */
     @Test
-    void ShouldListWorkspaces() throws Exception {
+    void shouldListWorkspaces() throws Exception {
+
+        // Crea un directorio temporal y un espacio de trabajo para la prueba
+        String tempDirA = Files.createTempDirectory("devvault-test-a").toString();
+        String tempDirB = Files.createTempDirectory("devvault-test-b").toString();
+
+        // Crea dos espacios de trabajo con rutas diferentes
+        CreatedWorkspaceRequest requestA = new CreatedWorkspaceRequest("Workspace A", tempDirA);
+
+        // Envía una solicitud POST para crear el primer espacio de trabajo
         mockMvc.perform(post("/api/v1/workspaces")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(requestA)))
+                .andExpect(status().isCreated());
+
+        // Envía una solicitud POST para crear el segundo espacio de trabajo
+        CreatedWorkspaceRequest requestB = new CreatedWorkspaceRequest("Workspace B", tempDirB);
+
+        mockMvc.perform(post("/api/v1/workspaces")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(requestB)))
+                .andExpect(status().isCreated());
+
+        // Envía una solicitud GET para listar los espacios de trabajo y verifica que la respuesta contenga ambos espacios de trabajo
+        mockMvc.perform(get("/api/v1/workspaces")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1));
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].name").value("Workspace A"))
+                .andExpect(jsonPath("$[1].name").value("Workspace B"));
     }
 }
