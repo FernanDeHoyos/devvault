@@ -22,17 +22,44 @@ import org.springframework.stereotype.Component;
 @Component
 public class ScannerEngine {
     
-    private static final Set<String> IGNORED_DIRS = Set.of(".git", "node_modules", "target", "build", "out", ".idea", ".vscode", ".dist");
+    // Poda carpetas irrelevantes para la detección de proyectos (RF-07, RNF-02)
+    private static final Set<String> IGNORED_DIRS = Set.of(
+        ".git", 
+        "node_modules", 
+        "target", 
+        "build", 
+        "out", 
+        ".idea", 
+        ".vscode", 
+        ".dist",
+        ".gradle",
+        ".mvn",
+        "venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".next",
+        ".nuxt",
+        "vendor");
 
+    // Inyección de dependencias de los plugins de tecnología
     private final List<TechnologyPlugin> plugin;
 
     public ScannerEngine(List<TechnologyPlugin> plugin) {
         this.plugin = plugin;
     }
 
+    /**
+     * Escanea recursivamente un directorio raíz, detectando proyectos según los plugins de tecnología registrados.
+     * Poda carpetas irrelevantes y delega la detección a cada plugin.
+     * @param rootPath el directorio raíz del workspace a escanear
+     * @return una lista de ScannedProject que representan los proyectos detectados
+     * @throws RuntimeException si ocurre un error durante el escaneo
+     */
     public List<ScannedProject> scanProjects(Path rootPath) {
         List<ScannedProject> scannedProjects = new java.util.ArrayList<>();
 
+        // Recorre el árbol de directorios, ignorando carpetas irrelevantes
+        // y detectando proyectos
         try {
             Files.walkFileTree(rootPath, new SimpleFileVisitor<>() {
                 @Override
@@ -52,6 +79,13 @@ public class ScannerEngine {
         return scannedProjects;
     }
 
+    /**
+     * Intenta detectar un proyecto en un directorio dado utilizando 
+     * los plugins de tecnología registrados.
+     * @param dir el directorio a escanear
+     * @return un Optional que contiene un ScannedProject si se detecta 
+     * un proyecto, o vacío si no se detecta ninguno
+     */
     private Optional<ScannedProject> detectInDirectory(Path dir) {
         for (TechnologyPlugin techPlugin : plugin) {
             Optional<DetectionResult> result = techPlugin.detect(dir);
@@ -62,5 +96,8 @@ public class ScannerEngine {
         return java.util.Optional.empty();
     }
 
+    /**
+     * Representa un proyecto escaneado, incluyendo su ruta y el resultado de la detección.
+     */
     public record ScannedProject(Path path, DetectionResult detectionResult) {}
 }

@@ -8,6 +8,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.devvault.discovery.domain.Project;
 
+/**
+ * Repositorio para gestionar proyectos.
+ */
 public interface ProjectRepository extends JpaRepository<Project, UUID> {
 
     Optional<Project> findByWorkspaceIdAndPath(UUID workspaceId, String path);

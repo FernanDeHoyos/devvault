@@ -70,7 +70,7 @@ public class WorkspaceController {
      * @return una ResponseEntity con el estado HTTP 200 (OK) si la solicitud fue exitosa
      */
     @PostMapping("/{id}/scan")
-    public ResponseEntity<Void> requestScan(@PathVariable UUID id) {
+    public ResponseEntity<Void> requestScan(@PathVariable("id") UUID id) {
         workspaceService.requestScan(id);
         return ResponseEntity.ok().build();
     }
