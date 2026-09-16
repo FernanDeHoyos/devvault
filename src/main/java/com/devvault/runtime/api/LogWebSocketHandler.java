@@ -36,25 +36,35 @@ import java.util.regex.Pattern;
 @Component
 public class LogWebSocketHandler extends TextWebSocketHandler {
 
+    // logger para registrar mensajes
     private static final Logger log = LoggerFactory.getLogger(LogWebSocketHandler.class);
-    private static final Pattern PROJECT_ID_PATTERN =
-            Pattern.compile("/api/v1/projects/([0-9a-fA-F-]{36})/logs");
+    // patron para extraer el id del proyecto de la URI
+    private static final Pattern PROJECT_ID_PATTERN = Pattern.compile("/api/v1/projects/([0-9a-fA-F-]{36})/logs");
 
+    // repositorios e interfaces
     private final ServiceRepository serviceRepository;
     private final ContainerRepository containerRepository;
     private final DockerClientAdapter dockerClientAdapter;
+    // mapper para convertir objetos a JSON
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    // coleccion para mantener los streams activos
     private final Map<String, ResultCallback<Frame>> activeStreams = new ConcurrentHashMap<>();
 
     public LogWebSocketHandler(ServiceRepository serviceRepository,
-                                ContainerRepository containerRepository,
-                                DockerClientAdapter dockerClientAdapter) {
+            ContainerRepository containerRepository,
+            DockerClientAdapter dockerClientAdapter) {
         this.serviceRepository = serviceRepository;
         this.containerRepository = containerRepository;
         this.dockerClientAdapter = dockerClientAdapter;
     }
 
+    /**
+     * Maneja la conexión con el cliente WebSocket.
+     * 
+     * @param session Sesión del cliente WebSocket
+     * @throws IOException Si ocurre un error al manejar la conexión
+     */
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws IOException {
         UriComponents uri = UriComponentsBuilder.fromUri(session.getUri()).build();
@@ -83,11 +93,17 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
 
         ResultCallback<Frame> callback = dockerClientAdapter.streamLogs(
                 container.get().getDockerContainerId(),
-                frame -> sendLine(session, frame)
-        );
+                frame -> sendLine(session, frame));
         activeStreams.put(session.getId(), callback);
     }
 
+    /**
+     * Maneja el cierre de la conexión con el cliente WebSocket.
+     * 
+     * @param session Sesión del cliente WebSocket
+     * @param status  Estado de cierre de la conexión
+     * @throws IOException Si ocurre un error al manejar el cierre de la conexión
+     */
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws IOException {
         ResultCallback<Frame> callback = activeStreams.remove(session.getId());
@@ -97,6 +113,13 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /**
+     * Busca un contenedor por ID de proyecto y nombre de servicio.
+     * 
+     * @param projectId   ID del proyecto
+     * @param serviceName Nombre del servicio
+     * @return Contenedor si se encuentra, Optional.empty() en caso contrario
+     */
     private Optional<Container> findContainer(UUID projectId, String serviceName) {
         Optional<Service> service = serviceRepository.findByProjectIdAndName(projectId, serviceName);
         if (service.isEmpty()) {
@@ -105,6 +128,12 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
         return containerRepository.findByServiceId(service.get().getId());
     }
 
+    /**
+     * Envía una línea de log a la sesión WebSocket.
+     * 
+     * @param session Sesión del cliente WebSocket
+     * @param frame   Frame con el log
+     */
     private void sendLine(WebSocketSession session, Frame frame) {
         if (!session.isOpen()) {
             return;
@@ -113,8 +142,7 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
             Map<String, Object> payload = Map.of(
                     "timestamp", Instant.now().toString(),
                     "level", "INFO",
-                    "message", new String(frame.getPayload(), StandardCharsets.UTF_8).stripTrailing()
-            );
+                    "message", new String(frame.getPayload(), StandardCharsets.UTF_8).stripTrailing());
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(payload)));
         } catch (IOException e) {
             log.debug(">>> No se pudo enviar línea de log (sesión probablemente cerrada)", e);

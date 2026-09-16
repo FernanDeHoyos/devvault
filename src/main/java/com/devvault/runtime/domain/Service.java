@@ -42,4 +42,7 @@ public class Service {
     public void updateStatus(ServiceStatus status) {
         this.status = status;
     }
+    public void updatePort(Integer port) {
+        this.port = port;
+    }
 }

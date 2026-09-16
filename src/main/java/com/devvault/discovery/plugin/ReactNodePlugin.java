@@ -2,6 +2,7 @@ package com.devvault.discovery.plugin;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -14,42 +15,102 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class ReactNodePlugin implements TechnologyPlugin {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    
+
+    /**
+     * Detecta la tecnología del proyecto.
+     * 
+     * @param projectDir Directorio del proyecto
+     * @return Resultado de la detección si se detecta tecnología, Optional.empty()
+     *         en caso contrario
+     */
     @Override
     public Optional<DetectionResult> detect(Path projectDir) {
         Path packageJson = projectDir.resolve("package.json");
         if (!packageJson.toFile().exists()) {
             return Optional.empty();
         }
-
         JsonNode root;
         try {
             root = objectMapper.readTree(packageJson.toFile());
         } catch (Exception e) {
             return Optional.empty();
         }
-        
+
         boolean isReact = hasDependency(root, "react");
         boolean isTypescript = Files.exists(projectDir.resolve("tsconfig.json"));
 
         String language = isTypescript ? "TypeScript" : "JavaScript";
         String version = isReact ? extractDependencyVersion(root, "react") : extractNodeEngineVersion(root);
         String framework = isReact ? "React" : "Node";
-        
+
         return Optional.of(new DetectionResult(
-            language, 
-            framework, 
-            version, 
-            Map.of("marker", "package.json", "reactDetected", isReact, "typescriptDetected", isTypescript)));
+                language,
+                framework,
+                version,
+                Map.of("marker", "package.json", "reactDetected", isReact, "typescriptDetected", isTypescript)));
     }
 
+    /**
+     * Obtiene la configuración de ejecución del proyecto.
+     * 
+     * @param projectDir Directorio del proyecto
+     * @return Configuración de ejecución si se encuentra, Optional.empty() en caso
+     *         contrario
+     */
+    @Override
+    public Optional<RunConfiguration> getRunConfiguration(Path projectDir) {
+
+        Path packageJson = projectDir.resolve("package.json");
+        if (!Files.exists(packageJson)) {
+            return Optional.empty();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(packageJson.toFile());
+            JsonNode scripts = root.path("scripts");
+            if (scripts.has("dev")) {
+                return Optional.of(
+                        new RunConfiguration(
+                                "app",
+                                List.of("npm.cmd", "run", "dev"),
+                                5174));
+            }
+            if (scripts.has("start")) {
+                return Optional.of(
+                        new RunConfiguration(
+                                "app",
+                                List.of("npm.cmd", "start"),
+                                3000));
+            }
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+
+        return Optional.empty();
+    }
+
+    /**
+     * Verifica si un paquete está instalado en el proyecto.
+     * 
+     * @param packageJson Nodo JSON del package.json
+     * @param dependency  Nombre del paquete a verificar
+     * @return true si el paquete está instalado, false en caso contrario
+     */
     private boolean hasDependency(JsonNode packageJson, String dependency) {
         return packageJson.path(
-            "dependencies")
-            .has(dependency) || packageJson.path("devDependencies")
-            .has(dependency);
+                "dependencies")
+                .has(dependency)
+                || packageJson.path("devDependencies")
+                        .has(dependency);
     }
 
+    /**
+     * Extrae la versión de una dependencia del package.json.
+     * 
+     * @param packageJson Nodo JSON del package.json
+     * @param dependency  Nombre de la dependencia
+     * @return Versión de la dependencia si se encuentra, "desconocida" en caso
+     *         contrario
+     */
     private String extractDependencyVersion(JsonNode packageJson, String dependency) {
         JsonNode versionNode = packageJson.path("dependencies").path(dependency);
         if (versionNode.isMissingNode()) {
@@ -58,9 +119,15 @@ public class ReactNodePlugin implements TechnologyPlugin {
         return versionNode.isMissingNode() ? "desconocida" : versionNode.asText();
     }
 
+    /**
+     * Extrae la versión de node del package.json.
+     * 
+     * @param packageJson Nodo JSON del package.json
+     * @return Versión de node si se encuentra, "desconocida" en caso contrario
+     */
     private String extractNodeEngineVersion(JsonNode packageJson) {
         JsonNode enginesNode = packageJson.path("engines").path("node");
         return enginesNode.isMissingNode() ? "desconocida" : enginesNode.asText();
     }
-    
+
 }

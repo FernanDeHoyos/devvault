@@ -18,4 +18,15 @@ public interface TechnologyPlugin {
      * (pom.xml, package.json, etc.) antes de abrir y parsear nada.
      */
     Optional<DetectionResult> detect(Path projectDir);
+
+    /**
+     * Obtiene la configuración necesaria para ejecutar localmente
+     * el proyecto detectado.
+     *
+     * @param projectDir directorio raíz del proyecto
+     * @return configuración de ejecución si esta tecnología es ejecutable
+     */
+    default Optional<RunConfiguration> getRunConfiguration(Path projectDir) {
+        return Optional.empty();
+    }
 }
