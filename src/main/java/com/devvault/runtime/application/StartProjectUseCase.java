@@ -48,10 +48,14 @@ public class StartProjectUseCase {
     private final RuntimeInstanceRepository runtimeInstanceRepository;
     private final ServiceRepository serviceRepository;
     private final ContainerRepository containerRepository;
+    private final LocalProcessLogHub localProcessLogHub;
+    private final LocalProcessManager localProcessManager;
 
     private final List<TechnologyPlugin> technologyPlugins;
 
-    private static final Pattern PORT_PATTERN = Pattern.compile("localhost:(\\d{4,5})");
+    private static final Pattern ANSI_CODES = Pattern.compile("\u001B\\[[;\\d]*m");
+    private static final Pattern PORT_PATTERN = Pattern.compile("https?://(?:localhost|127\\.0\\.0\\.1):(\\d{2,5})");
+
 
     public StartProjectUseCase(ProjectLookupService projectLookupService,
             DockerComposeRunner composeRunner,
@@ -59,7 +63,9 @@ public class StartProjectUseCase {
             RuntimeInstanceRepository runtimeInstanceRepository,
             ServiceRepository serviceRepository,
             ContainerRepository containerRepository,
-            List<TechnologyPlugin> technologyPlugins) {
+            List<TechnologyPlugin> technologyPlugins,
+            LocalProcessLogHub localProcessLogHub,
+            LocalProcessManager localProcessManager) {
         this.projectLookupService = projectLookupService;
         this.composeRunner = composeRunner;
         this.dockerClientAdapter = dockerClientAdapter;
@@ -67,6 +73,8 @@ public class StartProjectUseCase {
         this.serviceRepository = serviceRepository;
         this.containerRepository = containerRepository;
         this.technologyPlugins = technologyPlugins;
+        this.localProcessLogHub = localProcessLogHub;
+        this.localProcessManager = localProcessManager;
     }
 
     /**
@@ -98,6 +106,12 @@ public class StartProjectUseCase {
         Path composeFile = projectPath.resolve("docker-compose.yml");
         boolean hasDockerCompose = Files.exists(composeFile);
 
+        // NUEVO: aunque el estado guardado sea FAILED, el proceso del SO puede
+        // seguir vivo (health check falso negativo). No relanzar en ese caso.
+        if (isAnyLocalProcessStillAlive(projectId)) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "Ya hay un proceso local corriendo para este proyecto — detenlo antes de reiniciar");
+        }
         log.info(
                 ">>> Proyecto: {} | docker-compose.yml existe: {}",
                 projectPath,
@@ -123,6 +137,7 @@ public class StartProjectUseCase {
 
         RuntimeInstance instance = new RuntimeInstance(projectId);
         runtimeInstanceRepository.save(instance);
+
         Path projectPath = Path.of(project.path());
 
         try {
@@ -134,6 +149,12 @@ public class StartProjectUseCase {
                             HttpStatus.UNPROCESSABLE_ENTITY,
                             "La tecnología detectada no tiene una configuración de ejecución local: " + projectPath));
 
+            // 1. Persistimos el Service PRIMERO — necesitamos su id antes de
+            // arrancar el proceso, porque el log hub se indexa por serviceId.
+            Service service = serviceRepository.findByProjectIdAndName(projectId, configuration.serviceName())
+                    .orElseGet(() -> new Service(projectId, configuration.serviceName(), "APP", configuration.port()));
+            Service savedService = serviceRepository.save(service);
+
             log.info(">>> Ejecutando proyecto local {} con comando: {}", projectId, configuration.command());
 
             ProcessBuilder processBuilder = new ProcessBuilder(configuration.command())
@@ -141,17 +162,14 @@ public class StartProjectUseCase {
                     .redirectErrorStream(true);
 
             Process process = processBuilder.start();
+            localProcessManager.register(projectId, process);
             int pid = (int) process.pid();
             String commandText = String.join(" ", configuration.command());
 
             log.info(">>> Proyecto local {} iniciado. PID: {}", projectId, pid);
 
             AtomicInteger detectedPort = new AtomicInteger(-1);
-            drainProcessOutput(projectId, process, detectedPort);
-
-            Service service = serviceRepository.findByProjectIdAndName(projectId, configuration.serviceName())
-                    .orElseGet(() -> new Service(projectId, configuration.serviceName(), "APP", configuration.port()));
-            Service savedService = serviceRepository.save(service);
+            drainProcessOutput(savedService.getId(), projectId, process, detectedPort);
 
             Container container = containerRepository.findByServiceId(savedService.getId())
                     .map(existing -> {
@@ -163,16 +181,23 @@ public class StartProjectUseCase {
                     .orElseGet(() -> Container.localProcess(savedService.getId(), pid, commandText, "starting"));
             containerRepository.save(container);
 
-            // Health check: espera a que el proceso reporte un puerto real; si nunca
-            // lo reporta, cae de vuelta al puerto asumido por el plugin como plan B.
             boolean healthy = waitUntilLocalProcessHealthy(process, detectedPort, configuration.port());
 
-            int finalPort = detectedPort.get() > 0 ? detectedPort.get() : configuration.port();
-            if (finalPort != savedService.getPort()) {
-                // el puerto real terminó siendo distinto al asumido — lo corregimos
-                savedService.updatePort(finalPort); // <- ver nota abajo sobre este método
+            log.info(
+                    ">>> [{}] Health check: {} | detectedPort: {} | assumedPort: {}",
+                    projectId,
+                    healthy,
+                    detectedPort.get(),
+                    configuration.port());
+            Integer finalPort = detectedPort.get() > 0 ? detectedPort.get() : configuration.port();
+            if (!finalPort.equals(savedService.getPort())) {
+                savedService.updatePort(finalPort);
             }
 
+            log.info(
+                    ">>> [{}] Puerto final del servicio: {}",
+                    projectId,
+                    finalPort);
             savedService.updateStatus(healthy ? ServiceStatus.RUNNING : ServiceStatus.FAILED);
             serviceRepository.save(savedService);
 
@@ -193,6 +218,116 @@ public class StartProjectUseCase {
             return runtimeInstanceRepository.save(instance);
         }
     }
+
+
+    private boolean isAnyLocalProcessStillAlive(UUID projectId) {
+
+    Process process = localProcessManager.get(projectId);
+
+    if (process == null) {
+        return false;
+    }
+
+    boolean alive = process.isAlive();
+
+    log.info(
+            ">>> Proceso local del proyecto {} | PID: {} | alive: {}",
+            projectId,
+            process.pid(),
+            alive
+    );
+
+    return alive;
+}
+
+    private boolean waitUntilLocalProcessHealthy(
+        Process process,
+        AtomicInteger detectedPort,
+        int configuredPort) {
+
+    long timeout = System.currentTimeMillis() + 30_000;
+
+    while (System.currentTimeMillis() < timeout) {
+
+        // El proceso murió
+        if (!process.isAlive()) {
+            return false;
+        }
+
+        int port = detectedPort.get();
+
+        // Todavía no sabemos qué puerto está usando
+        if (port <= 0) {
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+
+            continue;
+        }
+
+        log.info(
+                ">>> Puerto detectado para el proceso: {}",
+                port
+        );
+
+        if (isPortOpen(port)) {
+            return true;
+        }
+
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    return false;
+}
+
+    private boolean isPortOpen(int port) {
+
+    boolean ipv4 = tryConnect("127.0.0.1", port);
+    log.info(">>> tryConnect 127.0.0.1:{} -> {}", port, ipv4);
+
+    if (ipv4) {
+        return true;
+    }
+
+    boolean ipv6 = tryConnect("::1", port);
+    log.info(">>> tryConnect ::1:{} -> {}", port, ipv6);
+
+    if (ipv6) {
+        return true;
+    }
+
+    boolean localhost = tryConnect("localhost", port);
+    log.info(">>> tryConnect localhost:{} -> {}", port, localhost);
+
+    return localhost;
+}
+
+private boolean tryConnect(String host, int port) {
+    try (java.net.Socket socket = new java.net.Socket()) {
+        socket.connect(
+                new java.net.InetSocketAddress(host, port),
+                1000
+        );
+        return true;
+    } catch (Exception e) {
+        log.info(
+                ">>> tryConnect {}:{} falló: {} - {}",
+                host,
+                port,
+                e.getClass().getSimpleName(),
+                e.getMessage()
+        );
+        return false;
+    }
+}
 
     /**
      * Ejecuta un proyecto con docker-compose.yml
@@ -379,68 +514,34 @@ public class StartProjectUseCase {
     }
 
     /**
-     * Verifica si un puerto está abierto.
-     * 
-     * @param port Puerto a verificar
-     * @return true si el puerto está abierto, false en caso contrario
-     */
-    private boolean isPortOpen(int port) {
-        try (java.net.Socket socket = new java.net.Socket()) {
-            socket.connect(new java.net.InetSocketAddress("localhost", port), 500);
-            return true;
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    /**
      * Lee la salida del proceso y detecta el puerto.
      * 
-     * @param projectId    ID del proyecto
+     * @param serviceId    ID del proyecto
      * @param process      Proceso
      * @param detectedPort Puerto detectado
      */
-    private void drainProcessOutput(UUID projectId, Process process, AtomicInteger detectedPort) {
-        Thread reader = new Thread(() -> {
-            try (var bufferedReader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = bufferedReader.readLine()) != null) {
-                    log.info(">>> [{}] {}", projectId, line);
-
-                    Matcher matcher = PORT_PATTERN.matcher(line);
-                    if (matcher.find()) {
-                        detectedPort.set(Integer.parseInt(matcher.group(1)));
-                    }
+    private void drainProcessOutput(UUID serviceId, UUID projectId, Process process, AtomicInteger detectedPort) {
+    Thread reader = new Thread(() -> {
+        try (var bufferedReader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = bufferedReader.readLine()) != null) {
+                String cleanLine = ANSI_CODES.matcher(line).replaceAll("");
+ 
+                log.info(">>> [{}] {}", projectId, cleanLine);
+                localProcessLogHub.publish(serviceId, cleanLine);
+ 
+                Matcher matcher = PORT_PATTERN.matcher(cleanLine);
+                if (matcher.find()) {
+                    detectedPort.set(Integer.parseInt(matcher.group(1)));
                 }
-            } catch (IOException e) {
-                log.debug(">>> Stream de salida del proceso local cerrado: {}", projectId);
             }
-        });
-        reader.setDaemon(true);
-        reader.start();
-    }
-
-    /**
-     * Espera a que el proceso local esté corriendo.
-     * 
-     * @param process      Proceso
-     * @param detectedPort Puerto detectado
-     * @param assumedPort  Puerto asumido
-     * @return true si el proceso está corriendo, false en caso contrario
-     */
-    private boolean waitUntilLocalProcessHealthy(Process process, AtomicInteger detectedPort, Integer assumedPort) {
-        for (int attempt = 0; attempt < HEALTH_CHECK_ATTEMPTS; attempt++) {
-            if (!process.isAlive()) {
-                return false;
-            }
-
-            Integer portToCheck = detectedPort.get() > 0 ? detectedPort.get() : assumedPort;
-            if (portToCheck != null && isPortOpen(portToCheck)) {
-                return true;
-            }
-            sleep();
+        } catch (IOException e) {
+            log.debug(">>> Stream de salida del proceso local cerrado: {}", projectId);
         }
-        return false;
-    }
+    });
+    reader.setDaemon(true);
+    reader.start();
+}
+
 }

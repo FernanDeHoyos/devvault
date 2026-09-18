@@ -4,13 +4,18 @@ import com.devvault.runtime.application.StartProjectUseCase;
 import com.devvault.runtime.application.StopProjectUseCase;
 import com.devvault.runtime.application.dto.RuntimeInstanceResponse;
 import com.devvault.runtime.application.dto.ServiceResponse;
+import com.devvault.runtime.domain.Container;
 import com.devvault.runtime.domain.RuntimeInstance;
+import com.devvault.runtime.domain.Service;
+import com.devvault.runtime.infrastructure.ContainerRepository;
 import com.devvault.runtime.infrastructure.RuntimeInstanceRepository;
 import com.devvault.runtime.infrastructure.ServiceRepository;
+import com.devvault.shared.api.exception.ApiException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import com.devvault.shared.api.exception.ApiException;
+
+
 
 
 import java.util.List;
@@ -24,15 +29,18 @@ public class RuntimeController {
     private final StopProjectUseCase stopProjectUseCase;
     private final RuntimeInstanceRepository runtimeInstanceRepository;
     private final ServiceRepository serviceRepository;
+    private final ContainerRepository containerRepository;
 
     public RuntimeController(StartProjectUseCase startProjectUseCase,
-            StopProjectUseCase stopProjectUseCase,
-            RuntimeInstanceRepository runtimeInstanceRepository,
-            ServiceRepository serviceRepository) {
+                              StopProjectUseCase stopProjectUseCase,
+                              RuntimeInstanceRepository runtimeInstanceRepository,
+                              ServiceRepository serviceRepository,
+                              ContainerRepository containerRepository) {
         this.startProjectUseCase = startProjectUseCase;
         this.stopProjectUseCase = stopProjectUseCase;
         this.runtimeInstanceRepository = runtimeInstanceRepository;
         this.serviceRepository = serviceRepository;
+        this.containerRepository = containerRepository;
     }
 
     /**
@@ -81,8 +89,12 @@ public class RuntimeController {
      */
     @GetMapping("/services")
     public List<ServiceResponse> services(@PathVariable UUID id) {
-        return serviceRepository.findByProjectId(id).stream()
-                .map(ServiceResponse::from)
+        List<Service> services = serviceRepository.findByProjectId(id);
+        return services.stream()
+                .map(service -> {
+                    Container container = containerRepository.findByServiceId(service.getId()).orElse(null);
+                    return ServiceResponse.from(service, container);
+                })
                 .toList();
     }
 }

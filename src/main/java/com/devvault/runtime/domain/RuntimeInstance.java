@@ -75,6 +75,8 @@ public class RuntimeInstance {
     }
  
     public boolean isActive() {
-        return overallStatus == RuntimeStatus.RUNNING || overallStatus == RuntimeStatus.STARTING;
+        return overallStatus == RuntimeStatus.RUNNING 
+        || overallStatus == RuntimeStatus.STARTING
+        || overallStatus == RuntimeStatus.FAILED;
     }
 }
