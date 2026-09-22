@@ -1,5 +1,6 @@
 package com.devvault.runtime.infrastructure;
 
+import com.devvault.runtime.application.StartProjectUseCase;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.model.Container;
@@ -11,6 +12,9 @@ import com.github.dockerjava.transport.DockerHttpClient;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 
 import jakarta.annotation.PreDestroy;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -26,6 +30,8 @@ import java.util.function.Consumer;
  */
 @Component
 public class DockerClientAdapter {
+
+    private static final Logger log = LoggerFactory.getLogger(StartProjectUseCase.class);
 
     private final DockerClient dockerClient;
     private final DockerHttpClient httpClient;
@@ -75,23 +81,56 @@ public class DockerClientAdapter {
      * (ej. cuando el cliente WebSocket se desconecta) — de lo contrario el
      * stream queda abierto indefinidamente y se filtra un hilo.
      */
-    public ResultCallback<Frame> streamLogs(String dockerContainerId, Consumer<Frame> onFrame) {
-        ResultCallback<Frame> callback = new ResultCallback.Adapter<>() {
-            @Override
-            public void onNext(Frame frame) {
-                onFrame.accept(frame);
-            }
-        };
- 
-        dockerClient.logContainerCmd(dockerContainerId)
-                .withStdOut(true)
-                .withStdErr(true)
-                .withFollowStream(true)
-                .withTailAll()
-                .exec(callback);
- 
-        return callback;
-    }
+    public ResultCallback<Frame> streamLogs(
+        String dockerContainerId,
+        Consumer<Frame> onFrame) {
+
+    ResultCallback.Adapter<Frame> callback =
+            new ResultCallback.Adapter<>() {
+
+                @Override
+                public void onNext(Frame frame) {
+                    onFrame.accept(frame);
+                }
+
+                @Override
+                public void onComplete() {
+                    log.info(
+                            ">>> Streaming de logs Docker finalizado: container={}",
+                            dockerContainerId
+                    );
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    if (throwable instanceof com.github.dockerjava.api.exception.NotFoundException) {
+
+                        log.warn(
+                                ">>> El contenedor Docker {} ya no existe. " +
+                                "No se pueden obtener sus logs.",
+                                dockerContainerId
+                        );
+
+                        return;
+                    }
+
+                    log.error(
+                            ">>> Error haciendo streaming de logs Docker del contenedor {}",
+                            dockerContainerId,
+                            throwable
+                    );
+                }
+            };
+
+    dockerClient.logContainerCmd(dockerContainerId)
+            .withStdOut(true)
+            .withStdErr(true)
+            .withFollowStream(true)
+            .withTailAll()
+            .exec(callback);
+
+    return callback;
+}
 
     /**
      * Cierra el cliente de Docker.

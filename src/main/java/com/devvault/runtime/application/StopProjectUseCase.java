@@ -110,6 +110,25 @@ public class StopProjectUseCase {
         Path composeFile = Path.of(project.path()).resolve("docker-compose.yml");
         String composeProjectName = "devvault-" + projectId.toString().replace("-", "");
         composeRunner.down(composeFile, composeProjectName);
+
+    // Docker Compose detenido correctamente.
+    // Actualizamos el estado persistido en DevVault.
+    for (Service service : services) {
+
+        Optional<Container> containerOpt =
+                containerRepository.findByServiceId(service.getId());
+
+        if (containerOpt.isPresent()) {
+
+            Container container = containerOpt.get();
+
+            container.updateState("stopped");
+            containerRepository.save(container);
+        }
+
+        service.updateStatus(ServiceStatus.STOPPED);
+        serviceRepository.save(service);
+    }
     }
  
     instance.markStopped();

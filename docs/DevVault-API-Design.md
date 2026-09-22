@@ -180,11 +180,19 @@ Estado agregado del `RuntimeInstance` actual.
 ```
 
 ### `GET /projects/{id}/services`
-Lista los `Service` + `Container` del proyecto, con detalle completo.
+Lista los `Service` + `Container` del proyecto. Desde la extensión de ejecución local (ver sección 5.1 del documento de diseño), la respuesta es polimórfica según `kind`:
+
 **Response `200`:** array de:
 ```json
-{ "id": "uuid", "name": "postgres", "type": "DATABASE", "port": 5432, "status": "RUNNING", "containerId": "docker-abc123" }
+// Un servicio Docker
+{ "id": "uuid", "name": "postgres", "type": "DATABASE", "port": 5432, "status": "RUNNING",
+  "kind": "DOCKER", "pid": null, "command": null, "dockerContainerId": "docker-abc123" }
+
+// Un servicio de proceso local (ej. npm run dev)
+{ "id": "uuid", "name": "app", "type": "APP", "port": 5174, "status": "RUNNING",
+  "kind": "LOCAL_PROCESS", "pid": 22976, "command": "npm.cmd run dev", "dockerContainerId": null }
 ```
+`port` refleja el puerto **real** detectado en la salida del proceso (no necesariamente el asumido por convención — ver nota de diseño en 5.1 sobre por qué el puerto asumido no es confiable).
 
 ### `WS /projects/{id}/logs?service={serviceId}`
 Canal WebSocket de streaming de logs en vivo (CU-07).

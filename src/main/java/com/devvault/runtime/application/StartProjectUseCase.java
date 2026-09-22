@@ -7,6 +7,7 @@ import com.devvault.runtime.domain.RuntimeStatus;
 import com.devvault.discovery.plugin.TechnologyPlugin;
 import com.devvault.discovery.plugin.RunConfiguration;
 import com.devvault.shared.api.exception.ApiException;
+import com.devvault.runtime.domain.event.ProjectFailedEvent;
 import com.github.dockerjava.api.model.ContainerPort;
 import com.devvault.runtime.domain.ServiceStatus;
 import com.devvault.runtime.infrastructure.ContainerRepository;
@@ -17,6 +18,7 @@ import com.devvault.runtime.infrastructure.RuntimeInstanceRepository;
 import com.devvault.runtime.infrastructure.ServiceRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,12 +52,12 @@ public class StartProjectUseCase {
     private final ContainerRepository containerRepository;
     private final LocalProcessLogHub localProcessLogHub;
     private final LocalProcessManager localProcessManager;
+    private final ApplicationEventPublisher eventPublisher;
 
     private final List<TechnologyPlugin> technologyPlugins;
 
     private static final Pattern ANSI_CODES = Pattern.compile("\u001B\\[[;\\d]*m");
     private static final Pattern PORT_PATTERN = Pattern.compile("https?://(?:localhost|127\\.0\\.0\\.1):(\\d{2,5})");
-
 
     public StartProjectUseCase(ProjectLookupService projectLookupService,
             DockerComposeRunner composeRunner,
@@ -65,7 +67,8 @@ public class StartProjectUseCase {
             ContainerRepository containerRepository,
             List<TechnologyPlugin> technologyPlugins,
             LocalProcessLogHub localProcessLogHub,
-            LocalProcessManager localProcessManager) {
+            LocalProcessManager localProcessManager,
+            ApplicationEventPublisher eventPublisher) {
         this.projectLookupService = projectLookupService;
         this.composeRunner = composeRunner;
         this.dockerClientAdapter = dockerClientAdapter;
@@ -75,6 +78,7 @@ public class StartProjectUseCase {
         this.technologyPlugins = technologyPlugins;
         this.localProcessLogHub = localProcessLogHub;
         this.localProcessManager = localProcessManager;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -219,115 +223,110 @@ public class StartProjectUseCase {
         }
     }
 
-
     private boolean isAnyLocalProcessStillAlive(UUID projectId) {
 
-    Process process = localProcessManager.get(projectId);
+        Process process = localProcessManager.get(projectId);
 
-    if (process == null) {
-        return false;
-    }
-
-    boolean alive = process.isAlive();
-
-    log.info(
-            ">>> Proceso local del proyecto {} | PID: {} | alive: {}",
-            projectId,
-            process.pid(),
-            alive
-    );
-
-    return alive;
-}
-
-    private boolean waitUntilLocalProcessHealthy(
-        Process process,
-        AtomicInteger detectedPort,
-        int configuredPort) {
-
-    long timeout = System.currentTimeMillis() + 30_000;
-
-    while (System.currentTimeMillis() < timeout) {
-
-        // El proceso murió
-        if (!process.isAlive()) {
+        if (process == null) {
             return false;
         }
 
-        int port = detectedPort.get();
+        boolean alive = process.isAlive();
 
-        // Todavía no sabemos qué puerto está usando
-        if (port <= 0) {
+        log.info(
+                ">>> Proceso local del proyecto {} | PID: {} | alive: {}",
+                projectId,
+                process.pid(),
+                alive);
+
+        return alive;
+    }
+
+    private boolean waitUntilLocalProcessHealthy(
+            Process process,
+            AtomicInteger detectedPort,
+            int configuredPort) {
+
+        long timeout = System.currentTimeMillis() + 30_000;
+
+        while (System.currentTimeMillis() < timeout) {
+
+            // El proceso murió
+            if (!process.isAlive()) {
+                return false;
+            }
+
+            int port = detectedPort.get();
+
+            // Todavía no sabemos qué puerto está usando
+            if (port <= 0) {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+
+                continue;
+            }
+
+            log.info(
+                    ">>> Puerto detectado para el proceso: {}",
+                    port);
+
+            if (isPortOpen(port)) {
+                return true;
+            }
+
             try {
                 Thread.sleep(500);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;
             }
-
-            continue;
         }
 
-        log.info(
-                ">>> Puerto detectado para el proceso: {}",
-                port
-        );
-
-        if (isPortOpen(port)) {
-            return true;
-        }
-
-        try {
-            Thread.sleep(500);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
+        return false;
     }
-
-    return false;
-}
 
     private boolean isPortOpen(int port) {
 
-    boolean ipv4 = tryConnect("127.0.0.1", port);
-    log.info(">>> tryConnect 127.0.0.1:{} -> {}", port, ipv4);
+        boolean ipv4 = tryConnect("127.0.0.1", port);
+        log.info(">>> tryConnect 127.0.0.1:{} -> {}", port, ipv4);
 
-    if (ipv4) {
-        return true;
+        if (ipv4) {
+            return true;
+        }
+
+        boolean ipv6 = tryConnect("::1", port);
+        log.info(">>> tryConnect ::1:{} -> {}", port, ipv6);
+
+        if (ipv6) {
+            return true;
+        }
+
+        boolean localhost = tryConnect("localhost", port);
+        log.info(">>> tryConnect localhost:{} -> {}", port, localhost);
+
+        return localhost;
     }
 
-    boolean ipv6 = tryConnect("::1", port);
-    log.info(">>> tryConnect ::1:{} -> {}", port, ipv6);
-
-    if (ipv6) {
-        return true;
+    private boolean tryConnect(String host, int port) {
+        try (java.net.Socket socket = new java.net.Socket()) {
+            socket.connect(
+                    new java.net.InetSocketAddress(host, port),
+                    1000);
+            return true;
+        } catch (Exception e) {
+            log.info(
+                    ">>> tryConnect {}:{} falló: {} - {}",
+                    host,
+                    port,
+                    e.getClass().getSimpleName(),
+                    e.getMessage());
+            return false;
+        }
     }
-
-    boolean localhost = tryConnect("localhost", port);
-    log.info(">>> tryConnect localhost:{} -> {}", port, localhost);
-
-    return localhost;
-}
-
-private boolean tryConnect(String host, int port) {
-    try (java.net.Socket socket = new java.net.Socket()) {
-        socket.connect(
-                new java.net.InetSocketAddress(host, port),
-                1000
-        );
-        return true;
-    } catch (Exception e) {
-        log.info(
-                ">>> tryConnect {}:{} falló: {} - {}",
-                host,
-                port,
-                e.getClass().getSimpleName(),
-                e.getMessage()
-        );
-        return false;
-    }
-}
 
     /**
      * Ejecuta un proyecto con docker-compose.yml
@@ -348,16 +347,32 @@ private boolean tryConnect(String host, int port) {
         DockerComposeRunner.ProcessResult result = composeRunner.up(composeFile, composeProjectName);
 
         if (!result.isSuccess()) {
-            instance.markFailed(
-                    "docker compose up falló: " + result.output());
+            String reason = "docker compose up falló: " + result.output();
+            instance.markFailed(reason);
             log.error(">>> Fallo al iniciar {}: {}", projectId, result.output());
-
+            eventPublisher.publishEvent(new ProjectFailedEvent(projectId, reason)); // <- nuevo
             return runtimeInstanceRepository.save(instance);
         }
 
         List<com.github.dockerjava.api.model.Container> dockerContainers = dockerClientAdapter
                 .listContainersByComposeProject(
                         composeProjectName);
+
+        log.info(
+                ">>> Contenedores Docker encontrados para {}: {}",
+                composeProjectName,
+                dockerContainers.size());
+
+        for (var dc : dockerContainers) {
+            log.info(
+                    ">>> Docker container encontrado | id={} | name={} | state={} | service={}",
+                    dc.getId(),
+                    dc.getNames() != null && dc.getNames().length > 0
+                            ? dc.getNames()[0]
+                            : "sin nombre",
+                    dc.getState(),
+                    dc.getLabels().get("com.docker.compose.service"));
+        }
 
         boolean allHealthy = true;
         String failedServiceName = null;
@@ -389,14 +404,27 @@ private boolean tryConnect(String host, int port) {
             Container container = containerRepository
                     .findByServiceId(savedService.getId())
                     .map(existingContainer -> {
-                        existingContainer.updateState(
-                                dc.getState());
+                        log.info(
+                                ">>> Actualizando Container BD | serviceId={} | ID anterior={} | ID nuevo={}",
+                                savedService.getId(),
+                                existingContainer.getDockerContainerId(),
+                                dc.getId());
+                        existingContainer.updateDockerContainerId(dc.getId());
+                        existingContainer.updateState(dc.getState());
                         return existingContainer;
                     })
-                    .orElseGet(() -> new Container(
-                            savedService.getId(),
-                            dc.getId(),
-                            dc.getState()));
+                    .orElseGet(() -> {
+
+                        log.info(
+                                ">>> Creando Container BD | serviceId={} | ID={}",
+                                savedService.getId(),
+                                dc.getId());
+
+                        return new Container(
+                                savedService.getId(),
+                                dc.getId(),
+                                dc.getState());
+                    });
 
             containerRepository.save(container);
 
@@ -521,27 +549,27 @@ private boolean tryConnect(String host, int port) {
      * @param detectedPort Puerto detectado
      */
     private void drainProcessOutput(UUID serviceId, UUID projectId, Process process, AtomicInteger detectedPort) {
-    Thread reader = new Thread(() -> {
-        try (var bufferedReader = new java.io.BufferedReader(
-                new java.io.InputStreamReader(process.getInputStream()))) {
-            String line;
-            while ((line = bufferedReader.readLine()) != null) {
-                String cleanLine = ANSI_CODES.matcher(line).replaceAll("");
- 
-                log.info(">>> [{}] {}", projectId, cleanLine);
-                localProcessLogHub.publish(serviceId, cleanLine);
- 
-                Matcher matcher = PORT_PATTERN.matcher(cleanLine);
-                if (matcher.find()) {
-                    detectedPort.set(Integer.parseInt(matcher.group(1)));
+        Thread reader = new Thread(() -> {
+            try (var bufferedReader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = bufferedReader.readLine()) != null) {
+                    String cleanLine = ANSI_CODES.matcher(line).replaceAll("");
+
+                    log.info(">>> [{}] {}", projectId, cleanLine);
+                    localProcessLogHub.publish(serviceId, cleanLine);
+
+                    Matcher matcher = PORT_PATTERN.matcher(cleanLine);
+                    if (matcher.find()) {
+                        detectedPort.set(Integer.parseInt(matcher.group(1)));
+                    }
                 }
+            } catch (IOException e) {
+                log.debug(">>> Stream de salida del proceso local cerrado: {}", projectId);
             }
-        } catch (IOException e) {
-            log.debug(">>> Stream de salida del proceso local cerrado: {}", projectId);
-        }
-    });
-    reader.setDaemon(true);
-    reader.start();
-}
+        });
+        reader.setDaemon(true);
+        reader.start();
+    }
 
 }

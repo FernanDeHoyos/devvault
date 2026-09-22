@@ -70,4 +70,7 @@ public class Container {
     public boolean isLocalProcess() {
         return kind == ContainerKind.LOCAL_PROCESS;
     }
+    public void updateDockerContainerId(String dockerContainerId) {
+    this.dockerContainerId = dockerContainerId;
+}
 }
