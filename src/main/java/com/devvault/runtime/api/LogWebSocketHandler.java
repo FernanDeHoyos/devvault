@@ -65,36 +65,52 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
         this.localProcessLogHub = localProcessLogHub;
     }
 
+    /**
+     * Maneja la conexión WebSocket.
+     * @param session Sesión WebSocket
+     * @throws IOException Si hay un error al cerrar la sesión
+     */
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws IOException {
+        // Parsear la URI para obtener el ID del proyecto y el nombre del servicio
         UriComponents uri = UriComponentsBuilder.fromUri(session.getUri()).build();
         Matcher matcher = PROJECT_ID_PATTERN.matcher(uri.getPath());
 
+        // Validar que la ruta sea válida
         if (!matcher.find()) {
             session.close(CloseStatus.BAD_DATA.withReason("Ruta inválida"));
             return;
         }
 
+        // Obtener el ID del proyecto y el nombre del servicio de la URI
         UUID projectId = UUID.fromString(matcher.group(1));
         String serviceName = uri.getQueryParams().getFirst("service");
 
+        // Validar que el nombre del servicio sea válido
         if (serviceName == null || serviceName.isBlank()) {
             session.close(CloseStatus.BAD_DATA.withReason("Falta el parámetro 'service'"));
             return;
         }
 
+        // Obtener el servicio
         Optional<Service> service = serviceRepository.findByProjectIdAndName(projectId, serviceName);
+
+        // Validar que el servicio exista
         if (service.isEmpty()) {
             session.close(CloseStatus.NOT_ACCEPTABLE.withReason("Servicio no encontrado"));
             return;
         }
 
+        // Obtener el contenedor
         Optional<Container> container = containerRepository.findByServiceId(service.get().getId());
+
+        // Validar que el contenedor exista
         if (container.isEmpty()) {
             session.close(CloseStatus.NOT_ACCEPTABLE.withReason("No hay contenedor/proceso activo para ese servicio"));
             return;
         }
 
+        // Iniciar el stream según el tipo de contenedor
         if (container.get().getKind() == ContainerKind.LOCAL_PROCESS) {
             startLocalProcessStream(session, service.get().getId());
         } else {
@@ -102,7 +118,13 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /**
+     * Inicia el stream de logs de Docker.
+     * @param session Sesión WebSocket
+     * @param container Contenedor Docker
+     */
     private void startDockerStream(WebSocketSession session, Container container) {
+        // Validar que el contenedor Docker tenga un ID registrado
         if (container.getDockerContainerId() == null) {
             try {
                 session.close(CloseStatus.NOT_ACCEPTABLE.withReason("Contenedor Docker sin id registrado"));
@@ -111,6 +133,7 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        // Iniciar el stream de logs de Docker
         log.info(">>> Streaming de logs Docker iniciado: session={}", session.getId());
         ResultCallback<Frame> callback = dockerClientAdapter.streamLogs(
                 container.getDockerContainerId(),
@@ -119,6 +142,11 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
         activeDockerStreams.put(session.getId(), callback);
     }
 
+    /**
+     * Inicia el stream de logs de proceso local.
+     * @param session Sesión WebSocket
+     * @param serviceId ID del servicio
+     */
     private void startLocalProcessStream(WebSocketSession session, UUID serviceId) {
         log.info(">>> Streaming de logs de proceso local iniciado: session={}", session.getId());
 
@@ -131,13 +159,22 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
         activeLocalStreams.put(session.getId(), new LocalSubscription(serviceId, consumer));
     }
 
+    /**
+     * Maneja el cierre de la conexión WebSocket.
+     * @param session Sesión WebSocket
+     * @param status Estado de cierre
+     * @throws IOException Si hay un error al cerrar la sesión
+     */
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws IOException {
+
+        // Eliminar el stream de logs de Docker
         ResultCallback<Frame> dockerCallback = activeDockerStreams.remove(session.getId());
         if (dockerCallback != null) {
             dockerCallback.close();
         }
 
+        // Eliminar el stream de logs de proceso local
         LocalSubscription localSubscription = activeLocalStreams.remove(session.getId());
         if (localSubscription != null) {
             localProcessLogHub.unsubscribe(localSubscription.serviceId(), localSubscription.consumer());
@@ -146,10 +183,18 @@ public class LogWebSocketHandler extends TextWebSocketHandler {
         log.info(">>> Streaming de logs detenido: session={}", session.getId());
     }
 
+    /**
+     * Envía una línea de log a la sesión WebSocket.
+     * @param session Sesión WebSocket
+     * @param message Mensaje de log
+     */
     private void sendLine(WebSocketSession session, String message) {
+        // Validar que la sesión esté abierta
         if (!session.isOpen()) {
             return;
         }
+
+        // Crear el payload del mensaje de log
         try {
             Map<String, Object> payload = Map.of(
                     "timestamp", Instant.now().toString(),

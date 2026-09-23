@@ -16,6 +16,16 @@ public class ReactNodePlugin implements TechnologyPlugin {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @Override
+    public String pluginName() {
+        return "react-node-detector";
+    }
+
+    @Override
+    public String targetMarkerFiles() {
+        return "package.json";
+    }
+
     /**
      * Detecta la tecnología del proyecto.
      * 

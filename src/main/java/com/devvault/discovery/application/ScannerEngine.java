@@ -2,22 +2,27 @@ package com.devvault.discovery.application;
 
 import com.devvault.discovery.plugin.DetectionResult;
 import com.devvault.discovery.plugin.TechnologyPlugin;
+import com.devvault.plugin.infrastructure.PluginDescriptorRepository;
 
+import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 
 /**
  * Recorre recursivamente un Workspace, poda carpetas técnicas irrelevantes
  * (RF-07, RNF-02) y delega la detección de tecnología a cada TechnologyPlugin
- * registrado en el contexto de Spring — el engine no conoce ningún stack
- * concreto, solo orquesta.
+ * registrado en el contexto de Spring que además esté HABILITADO en
+ * plugin_descriptors (Plugin System, v0.3).
  */
 @Component
 public class ScannerEngine {
@@ -42,10 +47,13 @@ public class ScannerEngine {
         "vendor");
 
     // Inyección de dependencias de los plugins de tecnología
-    private final List<TechnologyPlugin> plugin;
+    private final List<TechnologyPlugin> plugins;
+    private final PluginDescriptorRepository pluginDescriptorRepository;
 
-    public ScannerEngine(List<TechnologyPlugin> plugin) {
-        this.plugin = plugin;
+
+    public ScannerEngine(List<TechnologyPlugin> plugins, PluginDescriptorRepository pluginDescriptorRepository) {
+        this.plugins = plugins;
+        this.pluginDescriptorRepository = pluginDescriptorRepository;
     }
 
     /**
@@ -55,28 +63,33 @@ public class ScannerEngine {
      * @return una lista de ScannedProject que representan los proyectos detectados
      * @throws RuntimeException si ocurre un error durante el escaneo
      */
-    public List<ScannedProject> scanProjects(Path rootPath) {
-        List<ScannedProject> scannedProjects = new java.util.ArrayList<>();
-
-        // Recorre el árbol de directorios, ignorando carpetas irrelevantes
-        // y detectando proyectos
+    public List<ScannedProject> scan(Path root) {
+        Set<String> enabledPluginNames = pluginDescriptorRepository.findByEnabledTrue().stream()
+                .map(pd -> pd.getName())
+                .collect(Collectors.toSet());
+ 
+        List<TechnologyPlugin> activePlugins = plugins.stream()
+                .filter(p -> enabledPluginNames.contains(p.pluginName()))
+                .toList();
+ 
+        List<ScannedProject> results = new ArrayList<>();
+ 
         try {
-            Files.walkFileTree(rootPath, new SimpleFileVisitor<>() {
+            Files.walkFileTree(root, new SimpleFileVisitor<>() {
                 @Override
-                public FileVisitResult preVisitDirectory(Path dir, java.nio.file.attribute.BasicFileAttributes attrs) {
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
                     if (IGNORED_DIRS.contains(dir.getFileName().toString())) {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
-
-                    detectInDirectory(dir).ifPresent(scannedProjects::add);
+                    detectInDirectory(dir, activePlugins).ifPresent(results::add);
                     return FileVisitResult.CONTINUE;
                 }
             });
-        } catch (java.io.IOException e) {
-            throw new RuntimeException("Error scanning projects", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Error recorriendo el Workspace: " + root, e);
         }
-
-        return scannedProjects;
+ 
+        return results;
     }
 
     /**
@@ -86,14 +99,14 @@ public class ScannerEngine {
      * @return un Optional que contiene un ScannedProject si se detecta 
      * un proyecto, o vacío si no se detecta ninguno
      */
-    private Optional<ScannedProject> detectInDirectory(Path dir) {
-        for (TechnologyPlugin techPlugin : plugin) {
-            Optional<DetectionResult> result = techPlugin.detect(dir);
+    private Optional<ScannedProject> detectInDirectory(Path dir, List<TechnologyPlugin> activePlugins) {
+        for (TechnologyPlugin plugin : activePlugins) {
+            Optional<DetectionResult> result = plugin.detect(dir);
             if (result.isPresent()) {
                 return Optional.of(new ScannedProject(dir, result.get()));
             }
         }
-        return java.util.Optional.empty();
+        return Optional.empty();
     }
 
     /**

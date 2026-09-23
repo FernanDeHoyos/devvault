@@ -7,9 +7,13 @@ import java.util.Optional;
 /**
  * Contrato que implementa cada detector de tecnología (RF-08, RF-24).
  * El ScannerEngine invoca detect() sobre cada carpeta candidata sin saber
- * nada de Spring Boot, React, ni ningún stack concreto — para agregar
- * soporte a un lenguaje nuevo, se agrega una implementación nueva de esta
- * interfaz, sin tocar el ScannerEngine.
+ * nada de Spring Boot, React, ni ningún stack concreto.
+ *
+ * Los tres métodos con default (pluginName, targetMarkerFiles, version) son
+ * los metadatos que el Plugin System usa para registrar cada plugin en
+ * plugin_descriptors y permitir habilitarlo/deshabilitarlo vía API sin
+ * tocar código — implementaciones existentes no necesitan sobreescribirlos
+ * a menos que quieran un nombre o versión específicos.
  */
 public interface TechnologyPlugin {
      /**
@@ -28,5 +32,17 @@ public interface TechnologyPlugin {
      */
     default Optional<RunConfiguration> getRunConfiguration(Path projectDir) {
         return Optional.empty();
+    }
+
+    default String pluginName() {
+        return getClass().getSimpleName();
+    }
+ 
+    default String targetMarkerFiles() {
+        return "-";
+    }
+ 
+    default String version() {
+        return "1.0";
     }
 }

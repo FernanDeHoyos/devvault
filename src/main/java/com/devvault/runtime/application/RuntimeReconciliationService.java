@@ -35,6 +35,7 @@ public class RuntimeReconciliationService implements ApplicationRunner {
      * verificar si hay procesos locales que deberían estar corriendo pero no lo están.
      * Si encuentra un PID que ya no existe, marca el servicio como detenido y
      * actualiza el estado del proyecto.
+     * CU-05
      */
     @Override
     @Transactional

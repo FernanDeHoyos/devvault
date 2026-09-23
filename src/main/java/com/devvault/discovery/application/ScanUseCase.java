@@ -54,7 +54,7 @@ public class ScanUseCase {
         scanStatusTracker.markInProgress(event.workspaceId());
  
         try {
-            List<ScannerEngine.ScannedProject> scanned = scannerEngine.scanProjects(Path.of(event.workspacePath()));
+            List<ScannerEngine.ScannedProject> scanned = scannerEngine.scan(Path.of(event.workspacePath()));
             log.info(">>> Scanner encontró {} proyecto(s)", scanned.size());
  
             for (ScannerEngine.ScannedProject item : scanned) {

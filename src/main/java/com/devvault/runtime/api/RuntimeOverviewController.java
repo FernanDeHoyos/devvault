@@ -34,6 +34,10 @@ public class RuntimeOverviewController {
         this.containerRepository = containerRepository;
     }
 
+    /**
+     * CU-04 Obtiene todos los runtimes activos.
+     * @return Lista de runtimes activos
+     */
     @GetMapping("/active")
     public List<ActiveRuntimeResponse> active() {
         return runtimeInstanceRepository.findByOverallStatus(RuntimeStatus.RUNNING).stream()
@@ -46,6 +50,11 @@ public class RuntimeOverviewController {
                 .toList();
     }
 
+    /**
+     * Convierte una lista de servicios a una lista de respuestas de servicios.
+     * @param projectId ID del proyecto
+     * @return Lista de respuestas de servicios
+     */
     private List<ServiceResponse> toServiceResponses(java.util.UUID projectId) {
         return serviceRepository.findByProjectId(projectId).stream()
                 .map(service -> ServiceResponse.from(

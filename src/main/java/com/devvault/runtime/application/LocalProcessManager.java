@@ -15,14 +15,28 @@ public class LocalProcessManager {
         processes.put(projectId, process);
     }
 
+    /**
+     * Obtiene el proceso por ID.
+     * @param projectId ID del proyecto
+     * @return Proceso
+     */
     public Process get(UUID projectId) {
         return processes.get(projectId);
     }
 
+    /**
+     * Elimina el proceso por ID.
+     * @param projectId ID del proyecto
+     */
     public void remove(UUID projectId) {
         processes.remove(projectId);
     }
 
+    /**
+     * CU-05 Detiene el proceso.
+     * @param projectId ID del proyecto
+     * @return True si se detuvo el proceso, false si no existía
+     */
    public boolean stop(UUID projectId) {
 
     Process process = processes.remove(projectId);

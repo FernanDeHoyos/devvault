@@ -29,6 +29,11 @@ public class LocalProcessLogHub {
     private final Map<UUID, Deque<String>> buffers = new ConcurrentHashMap<>();
     private final Map<UUID, Set<Consumer<String>>> subscribers = new ConcurrentHashMap<>();
 
+    /**
+     * CU-05 Publica una línea de log.
+     * @param serviceId ID del servicio
+     * @param line Línea de log
+     */
     public void publish(UUID serviceId, String line) {
         Deque<String> buffer = buffers.computeIfAbsent(serviceId, id -> new ArrayDeque<>());
         synchronized (buffer) {
@@ -40,6 +45,11 @@ public class LocalProcessLogHub {
         subscribers.getOrDefault(serviceId, Set.of()).forEach(consumer -> consumer.accept(line));
     }
 
+    /**
+     * CU-06 Obtiene las líneas de log recientes.
+     * @param serviceId ID del servicio
+     * @return Lista de líneas de log recientes
+     */
     public List<String> recentLines(UUID serviceId) {
         Deque<String> buffer = buffers.get(serviceId);
         if (buffer == null) return List.of();
@@ -48,10 +58,20 @@ public class LocalProcessLogHub {
         }
     }
 
+    /**
+     * Se subscribe a las líneas de log.
+     * @param serviceId ID del servicio
+     * @param consumer Consumidor de líneas de log
+     */
     public void subscribe(UUID serviceId, Consumer<String> consumer) {
         subscribers.computeIfAbsent(serviceId, id -> new CopyOnWriteArraySet<>()).add(consumer);
     }
 
+    /**
+     * Se desuscribe de las líneas de log.
+     * @param serviceId ID del servicio
+     * @param consumer Consumidor de líneas de log
+     */
     public void unsubscribe(UUID serviceId, Consumer<String> consumer) {
         subscribers.getOrDefault(serviceId, Set.of()).remove(consumer);
     }
