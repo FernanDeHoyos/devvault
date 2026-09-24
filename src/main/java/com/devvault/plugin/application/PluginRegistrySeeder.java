@@ -47,9 +47,14 @@ public class PluginRegistrySeeder implements ApplicationRunner{
     public void run(ApplicationArguments args) {
         for (TechnologyPlugin plugin : plugins) {
             String name = plugin.pluginName();
-            if (repository.findByName(name).isEmpty()) {
+            var existing = repository.findByName(name);
+            if (existing.isEmpty()) {
                 repository.save(new PluginDescriptor(name, plugin.targetMarkerFiles(), plugin.version()));
                 log.info(">>> Plugin registrado: {} (marcador: {})", name, plugin.targetMarkerFiles());
+            } else if (!existing.get().getTargetMarkerFiles().equals(plugin.targetMarkerFiles())) {
+                // Refresh plugin metadata without changing a user's enabled/disabled setting.
+                existing.get().updateTargetMarkerFiles(plugin.targetMarkerFiles());
+                repository.save(existing.get());
             }
         }
     }

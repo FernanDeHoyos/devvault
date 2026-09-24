@@ -149,6 +149,13 @@ Devuelve el catálogo estático de rutas HTTP detectadas en el código fuente de
 
 > El catálogo no ejecuta la aplicación. Las rutas construidas dinámicamente, registradas mediante patrones no soportados o condicionadas por lógica/configuración que el escáner no reconoce pueden no aparecer. Las rutas `resource` de Laravel se muestran como una declaración compacta, no como cada verbo generado por el framework.
 
+### `GET /projects/{id}/git`
+Consulta el estado Git local del proyecto: rama y commit actuales, cambios preparados/modificados/sin seguimiento, relación ahead/behind con upstream, ramas locales/remotas, hasta 50 commits y las últimas ejecuciones de `fetch` iniciadas desde DevVault.
+
+### `POST /projects/{id}/git/fetch`
+Ejecuta `git fetch --all --prune` usando la configuración de Git del usuario. Actualiza referencias remotas; no integra cambios en los archivos de trabajo. DevVault registra los intentos exitosos y fallidos.
+**Errores:** `404` proyecto inexistente, `409` sin remotos, `422` no es un repositorio Git, `502` error de conexión/autenticación, `504` tiempo agotado.
+
 ### `DELETE /projects/{id}`
 Archiva o elimina un proyecto detectado manualmente (fuera de un re-escaneo).
 **Response:** `204`
@@ -329,7 +336,7 @@ Marca una alerta como resuelta manualmente.
 Lista los `PluginDescriptor` registrados (detectores de tecnología).
 **Response `200`:**
 ```json
-[{ "id": "uuid", "name": "spring-boot-detector", "targetMarkerFiles": "pom.xml", "version": "1.0", "enabled": true }]
+[{ "id": "uuid", "name": "spring-boot-detector", "targetMarkerFiles": "pom.xml,build.gradle,build.gradle.kts", "version": "1.0", "enabled": true }]
 ```
 
 ### `PATCH /plugins/{id}`
@@ -354,6 +361,8 @@ Habilita/deshabilita un plugin de detección.
 | GET | `/projects` | Discovery | CU-04 |
 | GET | `/projects/{id}` | Discovery | CU-04 |
 | GET | `/projects/{id}/routes` | Discovery | — |
+| GET | `/projects/{id}/git` | Git | — |
+| POST | `/projects/{id}/git/fetch` | Git | — |
 | DELETE | `/projects/{id}` | Discovery | — |
 | POST | `/projects/{id}/start` | Runtime | CU-05 |
 | POST | `/projects/{id}/stop` | Runtime | CU-06 |
@@ -380,7 +389,7 @@ Habilita/deshabilita un plugin de detección.
 | GET | `/plugins` | Plugin | — |
 | PATCH | `/plugins/{id}` | Plugin | — |
 
-**Total: 34 endpoints** (33 REST + 1 WebSocket) que cubren el 100% de las HU del MVP 0.1 y dejan la estructura lista para 0.2 y 0.3 sin rediseñar nada.
+**Total: 36 endpoints** (35 REST + 1 WebSocket) que cubren el 100% de las HU del MVP 0.1 y dejan la estructura lista para 0.2 y 0.3 sin rediseñar nada.
 
 ---
 

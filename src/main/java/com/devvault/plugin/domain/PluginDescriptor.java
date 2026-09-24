@@ -52,4 +52,8 @@ public class PluginDescriptor {
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
     }
+
+    public void updateTargetMarkerFiles(String targetMarkerFiles) {
+        this.targetMarkerFiles = targetMarkerFiles;
+    }
 }

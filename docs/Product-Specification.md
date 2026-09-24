@@ -166,9 +166,9 @@ Formato: `Como [rol], quiero [acción], para [beneficio]`, con criterios de acep
 ### HU-05 — Detectar un proyecto Spring Boot
 **Como** desarrollador, **quiero** que DevVault reconozca automáticamente un proyecto Java/Spring Boot, **para** no tener que clasificarlo manualmente.
 - **Criterios de aceptación:**
-  - Dado que una carpeta contiene `pom.xml` con dependencia de `spring-boot-starter`, cuando el scanner la procesa, entonces se crea un `Project` con `language=Java`, `framework=Spring Boot`
-  - Dado que el `pom.xml` indica una versión de Spring Boot, cuando se detecta, entonces esa versión queda guardada en `ProjectProfile`
-  - Dado un `pom.xml` sin ninguna dependencia de Spring, cuando se procesa, entonces se detecta como `Java` genérico, no como `Spring Boot`
+  - Dado que una carpeta contiene `pom.xml`, `build.gradle` o `build.gradle.kts` con Spring Boot, cuando el scanner la procesa, entonces se crea un `Project` con `language=Java`, `framework=Spring Boot`
+  - Dado que el manifiesto Maven o Gradle indica una versión de Spring Boot, cuando se detecta, entonces esa versión queda guardada en `ProjectProfile`
+  - Dado un proyecto Maven o Gradle Java sin Spring Boot, cuando se procesa, entonces se detecta como `Java` genérico, no como `Spring Boot`
 - **Prioridad:** Alta · **Estimación:** M
 - **Trazabilidad:** RF-08, RF-09
 
