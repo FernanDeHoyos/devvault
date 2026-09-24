@@ -1,6 +1,10 @@
 package com.devvault.runtime.application;
 
 import java.util.Map;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -38,41 +42,62 @@ public class LocalProcessManager {
      * @return True si se detuvo el proceso, false si no existía
      */
    public boolean stop(UUID projectId) {
+    return stop(projectId, null, null);
+   }
 
+   /** Stops a registered process, or recovers it by its persisted PID after an app restart. */
+   public boolean stop(UUID projectId, Integer fallbackPid, Instant expectedStartedAt) {
     Process process = processes.remove(projectId);
-
-    if (process == null) {
+    if (process != null) {
+        return stopHandle(process.toHandle());
+    }
+    if (fallbackPid == null || fallbackPid <= 0) {
         return false;
     }
 
-    ProcessHandle handle = process.toHandle();
-
-    // Detener hijos primero
-    handle.descendants()
-            .filter(ProcessHandle::isAlive)
-            .forEach(ProcessHandle::destroy);
-
-    // Detener proceso principal
-    if (handle.isAlive()) {
-        handle.destroy();
+    Optional<ProcessHandle> persistedProcess = ProcessHandle.of(fallbackPid);
+    if (persistedProcess.isEmpty() || !persistedProcess.get().isAlive()) {
+        return false;
     }
 
-    // Dar tiempo para terminar correctamente
+    // Do not kill an unrelated process if the operating system has reused this PID.
+    if (expectedStartedAt != null) {
+        Optional<Instant> processStartedAt = persistedProcess.get().info().startInstant();
+        if (processStartedAt.isPresent()
+                && processStartedAt.get().isAfter(expectedStartedAt.plus(Duration.ofMinutes(5)))) {
+            return false;
+        }
+    }
+    return stopHandle(persistedProcess.get());
+   }
+
+   private boolean stopHandle(ProcessHandle handle) {
+    if (!handle.isAlive()) {
+        return true;
+    }
+    List<ProcessHandle> descendants = handle.descendants().toList();
+    descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroy);
+    handle.destroy();
+
     try {
-        Thread.sleep(500);
+        handle.onExit().get(750, java.util.concurrent.TimeUnit.MILLISECONDS);
     } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
+    } catch (Exception ignored) {
+        // Force-stop the process tree below if graceful termination timed out.
     }
 
-    // Forzar únicamente los que sobrevivieron
-    handle.descendants()
-            .filter(ProcessHandle::isAlive)
-            .forEach(ProcessHandle::destroyForcibly);
-
+    descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
     if (handle.isAlive()) {
         handle.destroyForcibly();
     }
-
-    return true;
+    try {
+        handle.onExit().get(750, java.util.concurrent.TimeUnit.MILLISECONDS);
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+    } catch (Exception ignored) {
+        // The caller verifies whether the process is still alive.
+    }
+    return !handle.isAlive() && descendants.stream().noneMatch(ProcessHandle::isAlive);
 }
 }

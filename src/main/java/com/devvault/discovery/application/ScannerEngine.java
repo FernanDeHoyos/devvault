@@ -70,6 +70,7 @@ public class ScannerEngine {
  
         List<TechnologyPlugin> activePlugins = plugins.stream()
                 .filter(p -> enabledPluginNames.contains(p.pluginName()))
+                .sorted(java.util.Comparator.comparingInt(TechnologyPlugin::detectionPriority).reversed())
                 .toList();
  
         List<ScannedProject> results = new ArrayList<>();

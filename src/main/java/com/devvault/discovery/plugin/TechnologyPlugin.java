@@ -45,4 +45,9 @@ public interface TechnologyPlugin {
     default String version() {
         return "1.0";
     }
+
+    /** Higher values win when a project contains markers for multiple stacks. */
+    default int detectionPriority() {
+        return 0;
+    }
 }

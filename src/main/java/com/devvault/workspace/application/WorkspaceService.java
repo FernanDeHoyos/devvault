@@ -57,11 +57,16 @@ public class WorkspaceService {
      */
     @Transactional
     public WorkspaceResponse create(CreatedWorkspaceRequest request){
-        NormalizeWorkspacePath(request.path());
-        validatePathNotUsed(request.path());
+        String normalizedPath = normalizeWorkspacePath(request.path());
+        validatePathNotUsed(normalizedPath);
+        Path normalized = Path.of(normalizedPath);
+        String folderName = normalized.getFileName() == null ? normalized.toString() : normalized.getFileName().toString();
+        String workspaceName = request.name() == null || request.name().isBlank()
+                ? folderName
+                : request.name().trim();
 
         // Crea un nuevo Workspace con el ID de usuario local, el nombre y el path proporcionados en la solicitud
-        Workspace workspace = new Workspace(LOCAL_USER_ID, request.name(), request .path());
+        Workspace workspace = new Workspace(LOCAL_USER_ID, workspaceName, normalizedPath);
         // Guarda el nuevo Workspace en la base de datos y devuelve la respuesta correspondiente
         Workspace saved = workspaceRepository.save(workspace);
         return WorkspaceResponse.from(saved);
@@ -93,7 +98,7 @@ public class WorkspaceService {
         return WorkspaceResponse.from(workspace);
     }
 
-    private String NormalizeWorkspacePath(String rowpath) {
+    private String normalizeWorkspacePath(String rowpath) {
         // Normaliza la ruta del espacio de trabajo para evitar problemas de formato
         Path path = Path.of(rowpath)
         .toAbsolutePath()

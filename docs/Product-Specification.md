@@ -117,8 +117,8 @@
 
 ### CU-13 — Ver métricas y alertas de un proyecto
 - **Actor:** Usuario
-- **Precondición:** el proyecto tiene o tuvo un `RuntimeInstance` con contenedores activos
-- **Flujo principal:** el usuario consulta `GET /projects/{id}/metrics` para ver CPU/RAM recientes por contenedor, y `GET /alerts` para ver alertas activas o resueltas
+- **Precondición:** el proyecto tiene o tuvo un `RuntimeInstance` con servicios Docker o procesos locales
+- **Flujo principal:** el usuario consulta `GET /projects/{id}/metrics` para ver CPU/RAM por servicio/runtime, y `GET /alerts` para ver alertas activas o resueltas
 - **Postcondición:** ninguna (operación de solo lectura)
 
 ---
@@ -348,7 +348,7 @@ Esto es lo que hace que, si mañana quieres extraer `runtime` a un microservicio
 ![Arquitectura](./logs.png)
 
 - **Workspace:** lista de Workspaces registrados (nombre, ruta, cantidad de proyectos, fecha del último escaneo) + botón "Escanear ahora" por fila, y un modal simple para crear uno nuevo (input de ruta local)
-- **Monitoring:** grid de tarjetas por contenedor con CPU/RAM actual (gauge simple o número + barra), y debajo un feed de alertas activas/resueltas — reutiliza el mismo componente de "actividad reciente" del Dashboard
+- **Monitoring:** grid de tarjetas por servicio/runtime con CPU/RAM actual (Docker o proceso local, agregado por árbol PID), y debajo un feed de alertas activas/resueltas — reutiliza el mismo componente de "actividad reciente" del Dashboard
 - **Settings:** formulario simple: ruta por defecto de escaneo, activar/desactivar autenticación (HU-01), gestión de `Resource` registrados, y la lista de `PluginDescriptor` habilitados/deshabilitados
 
 
@@ -1032,11 +1032,12 @@ Habilita/deshabilita o edita una regla.
 ###  6.8. Monitoring
 
 ### `GET /projects/{id}/metrics`
-Métricas recientes de CPU/RAM por contenedor (CU-13).
-**Query params:** `since` (default: última hora), `containerId` (opcional)
+Métricas actuales de CPU/RAM por servicio/runtime Docker o proceso local. El runtime local incluye el árbol descendiente del PID raíz, medido mediante OSHI. Las muestras se obtienen bajo demanda y no se conserva historial.
+**Query params:** `serviceId` (opcional)
 **Response `200`:**
 ```json
-[{ "containerId": "uuid", "cpuPercent": 12.4, "memMb": 340, "capturedAt": "..." }]
+[{ "serviceId": "uuid", "serviceName": "api", "runtimeKind": "DOCKER", "containerId": "docker-id", "pid": null, "cpuPercent": 12.4, "memMb": 340, "capturedAt": "..." },
+ { "serviceId": "uuid", "serviceName": "web", "runtimeKind": "LOCAL_PROCESS", "containerId": null, "pid": 1234, "cpuPercent": 4.8, "memMb": 120, "capturedAt": "..." }]
 ```
 
 ### `GET /alerts`
@@ -1117,7 +1118,8 @@ Habilita/deshabilita un plugin de detección.
 |---|---|
 | **0.1 (MVP)** | Workspace completo, Project (lectura), Auth simplificado (`permitAll`, sin login real) |
 | **0.2** | Runtime completo (start/stop/status/services/logs vía WS) |
-| **0.3** | Resource, Environment, Automation, Monitoring, Plugin |
+| **0.3** | Automation, Monitoring, Plugin |
+| **1.0** | Resource Management, Environment diffing, autenticación real con JWT y estabilización/documentación |
 
 
 ---
@@ -1187,8 +1189,8 @@ Roadmap dividido en 4 versiones progresivas. Cada versión tiene un objetivo cla
 **Alcance:**
 - Automation Engine completo: `trigger → condición → acción` (CU-11, CU-12)
 - Sistema de plugins abierto — extensible sin tocar el núcleo (RF-24)
-- Métricas de CPU/RAM por contenedor (CU-13)
-- Alertas ante eventos como caída de contenedor
+- Métricas de CPU/RAM para Docker y procesos locales (árbol descendiente del PID raíz, medido con OSHI) (CU-13)
+- Alertas ante fallos de runtimes Docker y procesos locales
 
 **Qué aprendes técnicamente:**
 - Diseño de un motor de reglas (patrón muy usado en sistemas empresariales reales: banca, seguros, e-commerce)

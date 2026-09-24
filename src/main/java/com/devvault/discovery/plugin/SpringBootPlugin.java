@@ -74,4 +74,9 @@ public class SpringBootPlugin implements TechnologyPlugin {
     public String targetMarkerFiles() {
         return "pom.xml";
     }
+
+    @Override
+    public int detectionPriority() {
+        return 30;
+    }
 }

@@ -211,14 +211,18 @@ public class StartProjectUseCase {
             if (healthy) {
                 instance.markRunning();
             } else {
-                instance.markFailed("El proceso local no respondió en ningún puerto detectable");
+                String reason = "El proceso local no respondió en ningún puerto detectable";
+                instance.markFailed(reason);
+                eventPublisher.publishEvent(new ProjectFailedEvent(projectId, reason));
             }
 
             return runtimeInstanceRepository.save(instance);
 
         } catch (IOException e) {
             log.error(">>> Error iniciando proyecto local {}", projectId, e);
-            instance.markFailed("No se pudo iniciar el proyecto: " + e.getMessage());
+            String reason = "No se pudo iniciar el proyecto: " + e.getMessage();
+            instance.markFailed(reason);
+            eventPublisher.publishEvent(new ProjectFailedEvent(projectId, reason));
             return runtimeInstanceRepository.save(instance);
         }
     }
@@ -437,10 +441,11 @@ public class StartProjectUseCase {
         if (allHealthy) {
             instance.markRunning();
         } else {
-            instance.markFailed(
-                    "Servicio '" +
+            String reason = "Servicio '" +
                             failedServiceName +
-                            "' no pasó el health check");
+                            "' no pasó el health check";
+            instance.markFailed(reason);
+            eventPublisher.publishEvent(new ProjectFailedEvent(projectId, reason));
         }
         return runtimeInstanceRepository.save(instance);
     }
@@ -515,6 +520,7 @@ public class StartProjectUseCase {
     private TechnologyPlugin findPlugin(Path projectPath) {
 
         return technologyPlugins.stream()
+                .sorted(java.util.Comparator.comparingInt(TechnologyPlugin::detectionPriority).reversed())
                 .filter(plugin -> plugin.detect(projectPath).isPresent())
                 .findFirst()
                 .orElseThrow(() -> new ApiException(

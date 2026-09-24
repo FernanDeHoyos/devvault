@@ -5,6 +5,7 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.api.model.Statistics;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
@@ -22,6 +23,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Envuelve el cliente de Docker Engine validado en el spike
@@ -72,6 +76,46 @@ public class DockerClientAdapter {
     public boolean isRunning(String dockerContainerId) {
         var inspect = dockerClient.inspectContainerCmd(dockerContainerId).exec();
         return Boolean.TRUE.equals(inspect.getState().getRunning());
+    }
+
+    /** Obtiene una muestra puntual, equivalente a `docker stats --no-stream`. */
+    public Statistics readStats(String dockerContainerId) {
+        AtomicReference<Statistics> sample = new AtomicReference<>();
+        CountDownLatch received = new CountDownLatch(1);
+        ResultCallback.Adapter<Statistics> callback = new ResultCallback.Adapter<>() {
+            @Override
+            public void onNext(Statistics statistics) {
+                sample.set(statistics);
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                received.countDown();
+                log.warn("No se pudieron obtener métricas para el contenedor {}: {}: {}",
+                        dockerContainerId, throwable.getClass().getSimpleName(), throwable.getMessage());
+            }
+
+            @Override
+            public void onComplete() {
+                while (received.getCount() > 0) received.countDown();
+            }
+        };
+        dockerClient.statsCmd(dockerContainerId)
+                .withNoStream(true)
+                .exec(callback);
+        try {
+            received.await(15, TimeUnit.SECONDS);
+            return sample.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Lectura de métricas Docker interrumpida", e);
+        } finally {
+            try {
+                callback.close();
+            } catch (IOException e) {
+                log.debug("No se pudo cerrar callback de métricas Docker", e);
+            }
+        }
     }
 
 

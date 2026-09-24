@@ -65,9 +65,9 @@ Agrupados por bounded context, con prioridad (M = MVP 0.1, S = 0.2, L = 0.3+).
 ### 2.8 Monitoring
 | ID | Requisito | Prioridad |
 |---|---|---|
-| RF-21 | El sistema muestra métricas básicas (CPU, RAM) de los contenedores activos | S |
+| RF-21 | El sistema muestra CPU/RAM de runtimes Docker y procesos locales; para procesos locales agrega el árbol de procesos del PID raíz usando OSHI | S |
 | RF-22 | El sistema hace streaming de logs en vivo por servicio | S |
-| RF-23 | El sistema genera alertas ante caída de un contenedor | L |
+| RF-23 | El sistema genera alertas cuando falla un runtime Docker o un proceso local | L |
 
 ### 2.9 Plugin System
 | ID | Requisito | Prioridad |
@@ -204,8 +204,8 @@ Agrupados por bounded context, con prioridad (M = MVP 0.1, S = 0.2, L = 0.3+).
 
 ### CU-13 — Ver métricas y alertas de un proyecto
 - **Actor:** Usuario
-- **Precondición:** el proyecto tiene o tuvo un `RuntimeInstance` con contenedores activos
-- **Flujo principal:** el usuario consulta `GET /projects/{id}/metrics` para ver CPU/RAM recientes por contenedor, y `GET /alerts` para ver alertas activas o resueltas
+- **Precondición:** el proyecto tiene o tuvo un `RuntimeInstance` con servicios Docker o procesos locales
+- **Flujo principal:** el usuario consulta `GET /projects/{id}/metrics` para ver CPU/RAM por servicio/runtime, y `GET /alerts` para ver alertas activas o resueltas
 - **Postcondición:** ninguna (operación de solo lectura)
 
 ---
@@ -467,7 +467,7 @@ PATCH  /automation/rules/{id}   → habilita/deshabilita
 
 ### Monitoring
 ```
-GET    /projects/{id}/metrics   → métricas recientes de CPU/RAM
+GET    /projects/{id}/metrics   → métricas de CPU/RAM para Docker y procesos locales (árbol PID vía OSHI)
 GET    /alerts                  → alertas activas
 ```
 
@@ -559,7 +559,7 @@ Login local · Crear Workspace · Escanear proyectos · Detectar tecnologías (2
 Docker management (start/stop/restart) · Logs en vivo · Estado de servicios · Health checks
 
 **v0.3**
-Automation Engine · Sistema de plugins abierto · Monitoring con métricas
+Automation Engine · Sistema de plugins abierto · Monitoring CPU/RAM para Docker y procesos locales (árbol PID vía OSHI) · Alertas para ambos runtimes
 
 **v1.0**
 Resource Management completo · Environment diffing · Plataforma estable, documentada, lista para uso diario real

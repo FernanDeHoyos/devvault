@@ -23,6 +23,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+	// Métricas de procesos locales en Windows/macOS/Linux (JNA).
+	implementation 'com.github.oshi:oshi-core:7.6.1'
 	implementation 'org.flywaydb:flyway-database-postgresql'
 	compileOnly 'org.projectlombok:lombok'
 	runtimeOnly 'org.postgresql:postgresql'

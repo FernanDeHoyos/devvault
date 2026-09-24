@@ -3,6 +3,8 @@ package com.devvault.discovery.plugin;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -24,6 +26,11 @@ public class ReactNodePlugin implements TechnologyPlugin {
     @Override
     public String targetMarkerFiles() {
         return "package.json";
+    }
+
+    @Override
+    public int detectionPriority() {
+        return 10;
     }
 
     /**
@@ -48,16 +55,28 @@ public class ReactNodePlugin implements TechnologyPlugin {
 
         boolean isReact = hasDependency(root, "react");
         boolean isTypescript = Files.exists(projectDir.resolve("tsconfig.json"));
+        boolean isNest = hasDependency(root, "@nestjs/core");
+        boolean isFastify = hasDependency(root, "fastify");
+        boolean isExpress = hasDependency(root, "express");
 
         String language = isTypescript ? "TypeScript" : "JavaScript";
         String version = isReact ? extractDependencyVersion(root, "react") : extractNodeEngineVersion(root);
-        String framework = isReact ? "React" : "Node";
+        String framework = isReact ? "React" : isNest ? "NestJS" : isFastify ? "Fastify" : isExpress ? "Express" : "Node";
+        List<String> technologies = new ArrayList<>();
+        if (isNest) technologies.add("NestJS");
+        if (isFastify) technologies.add("Fastify");
+        if (isExpress) technologies.add("Express");
+        Map<String, Object> markers = new LinkedHashMap<>();
+        markers.put("marker", "package.json");
+        markers.put("reactDetected", isReact);
+        markers.put("typescriptDetected", isTypescript);
+        markers.put("technologies", technologies.stream().distinct().toList());
 
         return Optional.of(new DetectionResult(
                 language,
                 framework,
                 version,
-                Map.of("marker", "package.json", "reactDetected", isReact, "typescriptDetected", isTypescript)));
+                markers));
     }
 
     /**

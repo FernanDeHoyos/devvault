@@ -1,5 +1,6 @@
 HELP.md
 .gradle
+.gradle-work/
 build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/

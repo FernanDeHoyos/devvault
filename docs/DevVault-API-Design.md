@@ -63,12 +63,13 @@ Devuelve el perfil del usuario autenticado.
 ## 2. Workspace
 
 ### `POST /workspaces`
-Crea un Workspace apuntando a una ruta local (HU-02).
+Crea un Workspace apuntando a una ruta local (HU-02). `name` es opcional; si se omite o está vacío, se toma el nombre de la carpeta seleccionada.
 
 **Request:**
 ```json
 { "name": "Mi PC — Development", "path": "D:/Development" }
 ```
+También se acepta `{ "path": "D:/Development" }` para usar el nombre de la carpeta.
 **Response `201`:**
 ```json
 { "id": "uuid", "name": "Mi PC — Development", "path": "D:/Development", "createdAt": "..." }
@@ -88,6 +89,10 @@ Detalle de un Workspace, incluyendo conteo de proyectos.
 { "id": "uuid", "name": "...", "path": "...", "createdAt": "...", "projectCount": 6, "lastScanAt": "..." }
 ```
 **Errores:** `404` no existe
+
+### `GET /workspaces/directories?path={path}`
+Lista las carpetas de la máquina donde corre DevVault para navegar hasta una carpeta desde la UI. Sin `path`, inicia en el directorio personal del usuario (`user.home`); si no está disponible, devuelve las raíces del sistema. `parentPath` permite subir un nivel por vez.
+**Response `200`:** `{ "currentPath": "C:/Users/user", "parentPath": "C:/Users", "directories": [{ "name": "Documents", "path": "C:/Users/user/Documents" }] }`
 
 ### `POST /workspaces/{id}/scan`
 Dispara el Scanner Engine de forma asíncrona (HU-04, CU-03).
@@ -136,6 +141,13 @@ Detalle completo, incluyendo el `ProjectProfile` (HU-08, CU-04).
 }
 ```
 **Errores:** `404`
+
+### `GET /projects/{id}/routes`
+Devuelve el catálogo estático de rutas HTTP detectadas en el código fuente del proyecto. Incluye método, ruta, controlador/handler, archivo y línea de origen. Soporta mappings de Spring MVC, declaraciones Laravel en `routes/*.php` y patrones habituales de Express, Fastify y NestJS.
+
+**Response `200`:** lista de `ProjectRouteResponse`; cada elemento indica `STATIC` o `CONDITIONAL` cuando la ruta depende de anotaciones Spring reconocidas.
+
+> El catálogo no ejecuta la aplicación. Las rutas construidas dinámicamente, registradas mediante patrones no soportados o condicionadas por lógica/configuración que el escáner no reconoce pueden no aparecer. Las rutas `resource` de Laravel se muestran como una declaración compacta, no como cada verbo generado por el framework.
 
 ### `DELETE /projects/{id}`
 Archiva o elimina un proyecto detectado manualmente (fuera de un re-escaneo).
@@ -290,15 +302,17 @@ Habilita/deshabilita o edita una regla.
 ## 8. Monitoring
 
 ### `GET /projects/{id}/metrics`
-Métricas recientes de CPU/RAM por contenedor (CU-13).
-**Query params:** `since` (default: última hora), `containerId` (opcional)
+Muestra CPU/RAM de los runtimes del proyecto: contenedores Docker y procesos locales. Para procesos locales se mide el árbol descendiente del PID raíz con OSHI. CPU se calcula comparando muestras consecutivas. Las métricas se consultan bajo demanda y no se conserva historial. Docker debe estar disponible para medir contenedores.
+**Query params:** `serviceId` (opcional)
 **Response `200`:**
 ```json
-[{ "containerId": "uuid", "cpuPercent": 12.4, "memMb": 340, "capturedAt": "..." }]
+[{ "serviceId": "uuid", "serviceName": "api", "runtimeKind": "DOCKER", "containerId": "docker-id", "pid": null, "cpuPercent": 12.4, "memMb": 340, "capturedAt": "..." },
+ { "serviceId": "uuid", "serviceName": "web", "runtimeKind": "LOCAL_PROCESS", "containerId": null, "pid": 1234, "cpuPercent": 4.8, "memMb": 120, "capturedAt": "..." }]
 ```
+`cpuPercent` puede ser `null` si el sistema operativo no entrega datos válidos en ambas muestras. `memMb` representa memoria residente agregada del runtime; puede haber pequeñas diferencias entre sistemas operativos.
 
 ### `GET /alerts`
-Alertas activas o resueltas.
+Alertas activas o resueltas, persistidas a partir de `ProjectFailedEvent`. Los fallos de arranque de Docker y procesos locales generan el mismo tipo de alerta (`PROJECT_FAILED`).
 **Query params:** `status` (`ACTIVE|RESOLVED`), `projectId`
 **Response `200`:** array de `Alert`
 
@@ -339,6 +353,7 @@ Habilita/deshabilita un plugin de detección.
 | DELETE | `/workspaces/{id}` | Workspace | — |
 | GET | `/projects` | Discovery | CU-04 |
 | GET | `/projects/{id}` | Discovery | CU-04 |
+| GET | `/projects/{id}/routes` | Discovery | — |
 | DELETE | `/projects/{id}` | Discovery | — |
 | POST | `/projects/{id}/start` | Runtime | CU-05 |
 | POST | `/projects/{id}/stop` | Runtime | CU-06 |
@@ -365,7 +380,7 @@ Habilita/deshabilita un plugin de detección.
 | GET | `/plugins` | Plugin | — |
 | PATCH | `/plugins/{id}` | Plugin | — |
 
-**Total: 33 endpoints** (32 REST + 1 WebSocket) que cubren el 100% de las HU del MVP 0.1 y dejan la estructura lista para 0.2 y 0.3 sin rediseñar nada.
+**Total: 34 endpoints** (33 REST + 1 WebSocket) que cubren el 100% de las HU del MVP 0.1 y dejan la estructura lista para 0.2 y 0.3 sin rediseñar nada.
 
 ---
 
@@ -375,6 +390,7 @@ Habilita/deshabilita un plugin de detección.
 |---|---|
 | **0.1 (MVP)** | Workspace completo, Project (lectura), Auth simplificado (`permitAll`, sin login real) |
 | **0.2** | Runtime completo (start/stop/status/services/logs vía WS) |
-| **0.3** | Resource, Environment, Automation, Monitoring, Plugin |
+| **0.3** | Automation, Monitoring, Plugin |
+| **1.0** | Resource Management, Environment diffing, autenticación real con JWT y estabilización/documentación |
 
 Con esto ya tienes el contrato completo antes de escribir un solo `@RestController`.

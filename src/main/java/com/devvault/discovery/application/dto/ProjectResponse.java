@@ -1,6 +1,7 @@
 package com.devvault.discovery.application.dto;
 
 import java.util.UUID;
+import java.util.List;
 
 import com.devvault.discovery.application.GitInfoReader;
 import com.devvault.discovery.domain.Project;
@@ -21,7 +22,8 @@ public record ProjectResponse(
     String version,
     ProjectStatus status,
     String gitBranch,
-    String gitShortCommitHash
+    String gitShortCommitHash,
+    List<String> technologies
 ) {
 
     /**
@@ -41,6 +43,10 @@ public record ProjectResponse(
      * @return un ProjectResponse con la información del proyecto y Git
      */
     public static ProjectResponse fromDomain(Project project, GitInfoReader.GitInfo gitInfo) {
+        return fromDomain(project, gitInfo, List.of());
+    }
+
+    public static ProjectResponse fromDomain(Project project, GitInfoReader.GitInfo gitInfo, List<String> technologies) {
         return new ProjectResponse(
             project.getId(),
             project.getWorkspaceId(),
@@ -51,7 +57,8 @@ public record ProjectResponse(
             project.getVersion(),
             project.getStatus(),
             gitInfo != null ? gitInfo.branch() : null,
-            gitInfo != null ? gitInfo.shortCommitHash() : null
+            gitInfo != null ? gitInfo.shortCommitHash() : null,
+            technologies == null ? List.of() : technologies
         );
     }
 }

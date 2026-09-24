@@ -11,7 +11,7 @@ import jakarta.validation.constraints.NotBlank;
  * @param path la ruta del espacio de trabajo
  */
 public record CreatedWorkspaceRequest(
-    @NotBlank(message = "Name is required") String name,
+    String name,
     @NotBlank(message = "Path is required") String path
 ){
     
