@@ -21,12 +21,12 @@ public class GitTrackingController {
     }
 
     @GetMapping
-    public GitRepositoryResponse inspect(@PathVariable UUID id) {
+    public GitRepositoryResponse inspect(@PathVariable("id") UUID id) {
         return gitTrackingService.inspect(id);
     }
 
     @PostMapping("/fetch")
-    public GitRepositoryResponse fetch(@PathVariable UUID id) {
+    public GitRepositoryResponse fetch(@PathVariable("id") UUID id) {
         return gitTrackingService.fetch(id);
     }
 }

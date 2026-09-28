@@ -1,23 +1,25 @@
 
 ## Product Specification
 
+> **Estado actual de autenticación:** el primer inicio permite crear un administrador local desde la UI y generar una clave de recuperación que el backend conserva como hash. La clave permite restablecer la contraseña y revoca sesiones anteriores. La clave JWT y los datos de autenticación se guardan fuera del repositorio. No hay registro público, entidad `User` ni roles; las propuestas de multiusuario son futuras.
+
 
 ## 1. Casos de uso
 
 ### CU-01 — Iniciar sesión
 - **Actor:** Usuario
-- **Precondición:** el usuario tiene una cuenta creada localmente
+- **Precondición:** si es el primer inicio, no existe administrador local configurado
 - **Flujo principal:**
-  1. El usuario envía email y contraseña
-  2. El sistema valida credenciales contra `User`
-  3. El sistema genera y devuelve un JWT
-- **Flujo alterno:** credenciales inválidas → `401 Unauthorized`, sin detalle de si el email existe (evitar user enumeration)
+  1. En el primer inicio, el usuario crea un administrador desde la UI
+  2. El sistema guarda el hash de contraseña y genera de forma segura la clave JWT local
+  3. En los siguientes inicios, valida usuario/contraseña y emite un JWT HS256 de corta duración
+- **Flujo alterno:** credenciales inválidas → `401 Unauthorized` genérico
 - **Postcondición:** el usuario queda autenticado para las siguientes peticiones
 
 ### CU-02 — Cerrar sesión
 - **Actor:** Usuario
 - **Precondición:** sesión activa (JWT válido)
-- **Flujo principal:** el cliente descarta el token; si se implementa blacklist de tokens, el sistema lo invalida server-side
+- **Flujo principal:** el cliente solicita el cierre y el sistema revoca el JWT hasta su expiración
 - **Postcondición:** el token deja de ser aceptado por el sistema
 
 ### CU-03 — Crear y escanear un Workspace
@@ -107,12 +109,12 @@
 - **Actor:** Sistema (disparado internamente, no por el usuario)
 - **Precondición:** existe al menos una `AutomationRule` habilitada
 - **Flujo principal:**
-  1. Un módulo publica un evento de dominio (ej. `runtime.ContainerFailedEvent`)
+  1. El runtime publica `ProjectFailedEvent` cuando falla el arranque local o Docker, o `ProjectStartedEvent` cuando el inicio termina correctamente
   2. El `RuleEvaluator` del módulo Automation recibe el evento vía el EventBus
   3. Evalúa qué reglas tienen un `Trigger` que coincide con el tipo de evento
   4. Para cada regla coincidente, evalúa sus `Condition` (si las tiene)
-  5. Si las condiciones se cumplen, ejecuta cada `Action` asociada
-- **Flujo alterno:** la acción falla (ej. no se pudo enviar la notificación) → se registra en `LogEntry`/`Alert`, no interrumpe la evaluación de otras reglas
+  5. Si las condiciones se cumplen, ejecuta cada `Action` asociada (`LOG` escribe en el log del backend)
+- **Flujo alterno:** la acción falla → se registra en el log del backend y no interrumpe las demás acciones
 - **Postcondición:** las acciones configuradas quedan ejecutadas o registrado el motivo de fallo
 
 ### CU-13 — Ver métricas y alertas de un proyecto
@@ -129,11 +131,13 @@
 
 Formato: `Como [rol], quiero [acción], para [beneficio]`, con criterios de aceptación en Gherkin y trazabilidad a los RF/CU definidos antes. Estimación en talla de camiseta (S/M/L) solo como referencia de esfuerzo relativo.
 
-### HU-01 — Acceder a la aplicación sin fricción
-**Como** desarrollador, **quiero** poder usar DevVault sin tener que crear una cuenta ni iniciar sesión, **para** empezar a usarla de inmediato en el MVP.
+### HU-01 — Configuración y acceso local de administrador
+**Como** desarrollador, **quiero** configurar una contraseña desde la UI en el primer inicio, **para** proteger DevVault sin editar archivos ni variables del sistema.
 - **Criterios de aceptación:**
-  - Dado que abro DevVault por primera vez, cuando accedo a cualquier endpoint, entonces no se me pide autenticación
-  - Dado que el módulo Identity existe en el código, cuando reviso la configuración de seguridad, entonces está explícito que `permitAll()` es temporal (comentario o flag `auth.enabled=false`)
+  - El primer inicio permite crear exactamente un administrador; los inicios posteriores presentan login
+  - Las rutas protegidas requieren un JWT válido y credenciales inválidas producen `401` genérico
+  - El token vence según la duración configurada y el cierre de sesión lo revoca
+  - El cliente conserva el token solo en la sesión del navegador
 - **Prioridad:** Alta · **Estimación:** S
 - **Trazabilidad:** RF-01/RF-02 (diferidos), decisión de diseño de la conversación anterior
 
@@ -217,7 +221,7 @@ Formato: `Como [rol], quiero [acción], para [beneficio]`, con criterios de acep
 
 | HU | Prioridad | Estimación |
 |---|---|---|
-| HU-01 Acceso sin fricción | Alta | S |
+| HU-01 Configuración de administrador | Alta | S |
 | HU-02 Crear Workspace | Alta | S |
 | HU-03 Listar Workspaces | Media | S |
 | HU-04 Escanear Workspace | Alta | M |
@@ -295,6 +299,7 @@ com.devvault
 ├── automation          (domain · application · infrastructure)
 ├── monitoring
 ├── plugin
+├── editor              (application · api)   ← abre el proyecto en el IDE
 ├── shared
 │   ├── events              (DomainEvent, EventBus)
 │   └── config
@@ -305,7 +310,7 @@ Cada módulo replica el mismo patrón interno: `domain` (entidades y reglas), `a
 
 ## Regla de oro: comunicación entre módulos
 
-**Un módulo nunca importa clases de `domain` de otro módulo directamente.** Toda comunicación cruzada pasa por el event bus (`ApplicationEventPublisher` de Spring). Ejemplo: `runtime` no llama directo a `automation`; publica `ContainerFailedEvent` y `automation` lo escucha.
+**Un módulo nunca importa clases de `domain` de otro módulo directamente.** Toda comunicación cruzada pasa por el event bus (`ApplicationEventPublisher` de Spring). Ejemplo: `runtime` publica `ProjectFailedEvent` o `ProjectStartedEvent` y `automation` los escucha.
 
 Esto es lo que hace que, si mañana quieres extraer `runtime` a un microservicio, solo cambias la infraestructura de mensajería (de `ApplicationEventPublisher` a RabbitMQ real) sin tocar una sola línea de lógica de negocio.
 
@@ -754,7 +759,7 @@ CREATE INDEX idx_project_profiles_raw_markers ON project_profiles USING GIN (raw
 
 - **Base path:** `/api/v1`
 - **Formato:** JSON en request y response, `Content-Type: application/json`
-- **Auth (cuando se active, ver HU-01):** `Authorization: Bearer {jwt}`
+- **Auth:** los endpoints `/api/**` requieren `Authorization: Bearer {accessToken}`, excepto setup inicial, login, health y handshake de logs con ticket.
 - **IDs:** UUID en formato string
 - **Fechas:** ISO-8601 con timezone (`2026-08-13T14:30:00Z`)
 - **Paginación** (en endpoints de listado que puedan crecer mucho): query params `page` (default 0) y `size` (default 20), respuesta envuelta:
@@ -783,30 +788,42 @@ CREATE INDEX idx_project_profiles_raw_markers ON project_profiles USING GIN (raw
 
 ### 6.1. Identity
 
+### `GET /auth/setup-status`
+Indica si falta crear el administrador y si está configurada la recuperación. **Response `200`:** `{ "setupRequired": true, "recoveryConfigured": false }`.
+
+### `POST /auth/setup`
+Crea el administrador una sola vez desde loopback. La contraseña debe tener 12–128 caracteres y se almacena con BCrypt. Recibe también una clave aleatoria de recuperación, de la cual se almacena solo el hash. **Response:** `204`; `409` si ya existe administrador.
+
+### `POST /auth/recover`
+Restablece la contraseña desde loopback con usuario y clave de recuperación. Incrementa la versión de credenciales para invalidar los JWT activos. **Response:** `204`; `401` si las credenciales de recuperación no coinciden.
+
 ### `POST /auth/login`
-Autentica al usuario y devuelve un JWT.
+Valida las credenciales del administrador local y devuelve un JWT HS256 de corta duración.
 
 **Request:**
 ```json
-{ "email": "dev@local.com", "password": "••••••••" }
+{ "username": "dev", "password": "••••••••" }
 ```
 **Response `200`:**
 ```json
-{ "token": "eyJhbGciOi...", "expiresAt": "2026-08-13T22:30:00Z" }
+{ "accessToken": "eyJhbGciOi...", "tokenType": "Bearer", "expiresAt": "...", "username": "dev" }
 ```
-**Errores:** `401` credenciales inválidas (mensaje genérico, sin revelar si el email existe — regla de negocio de Identity)
+**Errores:** `401` credenciales inválidas (mensaje genérico). Vigencia configurable, 20 minutos por defecto.
 
 ### `POST /auth/logout`
-Invalida la sesión actual (si se implementa blacklist de tokens).
+Revoca el JWT actual server-side hasta su expiración.
 **Response:** `204 No Content`
 
 ### `GET /auth/me`
-Devuelve el perfil del usuario autenticado.
+Devuelve el username del administrador autenticado.
 **Response `200`:**
 ```json
-{ "id": "uuid", "email": "dev@local.com", "role": "USER", "createdAt": "..." }
+{ "username": "dev" }
 ```
 **Errores:** `401` sin token o token inválido
+
+### `POST /auth/ws-ticket`
+Emite un ticket ligado a proyecto/servicio, válido 30 segundos y de un solo uso, para autorizar el handshake del WebSocket de logs.
 
 ---
 
@@ -1003,18 +1020,19 @@ Crea una regla (CU-11).
 **Request:**
 ```json
 {
-  "name": "Notificar caída de contenedor",
-  "projectId": "uuid",
-  "trigger": { "eventType": "ContainerFailedEvent" },
-  "conditions": [{ "expression": "service.type == 'DATABASE'" }],
-  "actions": [{ "actionType": "NOTIFY", "params": { "channel": "desktop" } }]
+  "name": "Registrar fallo de arranque",
+  "projectId": null,
+  "triggers": [{ "eventType": "ProjectFailedEvent" }],
+  "conditions": [{ "expression": "#reason.contains('puerto')" }],
+  "actions": [{ "actionType": "LOG", "params": { "message": "Falló #{projectId}: #{reason}" } }]
 }
 ```
 **Response `201`:** la regla creada con su `id`
-**Errores:** `400` si no se envía al menos un `trigger` (invariante de negocio)
+El `projectId` es opcional (`null` aplica a todos). Los eventos soportados son `ProjectFailedEvent` y `ProjectStartedEvent`; la única acción actual es `LOG`, que escribe al log del backend. Las condiciones SpEL reciben `#projectId` y, solo en fallos, `#reason`.
+**Errores:** `400` si no se envía al menos un `trigger` y una `action` (invariante de negocio)
 
 ### `GET /automation/rules`
-Lista reglas, filtrable por `projectId` y `enabled`.
+Lista todas las reglas; el alcance se define al crearla con `projectId` y `null` significa global.
 
 ### `GET /automation/rules/{id}`
 Detalle completo con triggers, condiciones y acciones.
@@ -1067,11 +1085,53 @@ Habilita/deshabilita un plugin de detección.
 
 ---
 
-### 6.10. Resumen de endpoints (referencia rápida)
+### 6.10. Editor de código
+
+Abre un proyecto en el editor instalado en la máquina. El editor se lanza como
+proceso desacoplado: no se registra en el runtime, no genera `RuntimeInstance` ni
+`Container`, no publica eventos y no se puede detener desde DevVault. El sistema
+operativo es su dueño y sobrevive al cierre de DevVault.
+
+El editor se resuelve por orden: el que indica la petición → el configurado en
+`devvault.editor.default-editor` → el primero disponible que se detecte.
+
+### `GET /editors`
+Lista los editores conocidos y cuáles están disponibles en esta máquina. No
+ejecuta nada: solo comprueba que el ejecutable exista, para no abrir una ventana
+del IDE cada vez que la UI pinta la lista.
+**Response `200`:**
+```json
+{
+  "editors": [
+    { "id": "vscode", "displayName": "Visual Studio Code", "available": true,
+      "executablePath": "C:\\Users\\user\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code.cmd", "isDefault": true },
+    { "id": "intellij", "displayName": "IntelliJ IDEA", "available": false,
+      "executablePath": null, "isDefault": false }
+  ],
+  "defaultId": "vscode",
+  "configuredId": "vscode"
+}
+```
+
+### `POST /projects/{id}/open`
+Abre la carpeta del proyecto en el editor. El editor va como query param, no en
+el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
+**Response `200`:** `{ "projectId": "uuid", "projectName": "...", "editorId": "vscode", "editorName": "Visual Studio Code", "executablePath": "..." }`
+**Errores:** `404` proyecto inexistente · `422` carpeta del proyecto ya no está en disco · `422` editor desconocido o no instalado.
+
+> Los editores de terminal (Neovim, Vim) no están en el catálogo: sin consola
+> adjunta no sobreviven a `ProcessBuilder`.
+
+---
+
+### 6.11. Resumen de endpoints (referencia rápida)
 
 | Método | Ruta | Módulo | Caso de uso |
 |---|---|---|---|
 | POST | `/auth/login` | Identity | CU-01 |
+| GET | `/auth/setup-status` | Identity | CU-01 |
+| POST | `/auth/setup` | Identity | CU-01 |
+| POST | `/auth/recover` | Identity | Recuperar el acceso local con la clave de recuperación |
 | POST | `/auth/logout` | Identity | CU-02 |
 | GET | `/auth/me` | Identity | — |
 | POST | `/workspaces` | Workspace | CU-03 |
@@ -1107,19 +1167,22 @@ Habilita/deshabilita un plugin de detección.
 | PATCH | `/alerts/{id}` | Monitoring | — |
 | GET | `/plugins` | Plugin | — |
 | PATCH | `/plugins/{id}` | Plugin | — |
+| GET | `/editors` | Editor | — |
+| POST | `/projects/{id}/open` | Editor | — |
 
-**Total: 33 endpoints** (32 REST + 1 WebSocket) que cubren el 100% de las HU del MVP 0.1 y dejan la estructura lista para 0.2 y 0.3 sin rediseñar nada.
+**Total documentado en este contrato: 42 endpoints** (41 REST + 1 WebSocket), incluyendo setup inicial, recuperación, ticket de autorización para logs y apertura en el editor.
 
 ---
 
-### 6.11. Alcance por versión
+### 6.12. Alcance por versión
 
 | Versión | Endpoints a implementar |
 |---|---|
-| **0.1 (MVP)** | Workspace completo, Project (lectura), Auth simplificado (`permitAll`, sin login real) |
+| **0.1 (MVP)** | Workspace completo, Project (lectura) |
 | **0.2** | Runtime completo (start/stop/status/services/logs vía WS) |
 | **0.3** | Automation, Monitoring, Plugin |
-| **1.0** | Resource Management, Environment diffing, autenticación real con JWT y estabilización/documentación |
+| **1.0** | Resource Management, Environment diffing, autenticación JWT local y estabilización/documentación |
+| **Posterior a 1.0** | Preferencia de editor por proyecto, abrir archivo y línea desde el catálogo de rutas, acción de automatización `OPEN_EDITOR` |
 
 
 ---
@@ -1144,7 +1207,7 @@ Roadmap dividido en 4 versiones progresivas. Cada versión tiene un objetivo cla
 - Dashboard simple mostrando los proyectos encontrados (HU-07, HU-08)
 - Re-escaneo de Workspace sin duplicar proyectos (HU-09)
 - Información básica de Git por proyecto (HU-10)
-- Auth simplificada — `permitAll()`, sin JWT real todavía (HU-01)
+- Auth local — primer inicio asistido, JWT temporal y logout con revocación (HU-01)
 - Base de datos con migraciones Flyway desde el día uno
 
 **Qué aprendes técnicamente:**
@@ -1188,7 +1251,7 @@ Roadmap dividido en 4 versiones progresivas. Cada versión tiene un objetivo cla
 
 **Alcance:**
 - Automation Engine completo: `trigger → condición → acción` (CU-11, CU-12)
-- Sistema de plugins abierto — extensible sin tocar el núcleo (RF-24)
+  - Administración de plugins incluidos y puntos de extensión internos (RF-24); instalación de plugins externos queda posterior a v1.0
 - Métricas de CPU/RAM para Docker y procesos locales (árbol descendiente del PID raíz, medido con OSHI) (CU-13)
 - Alertas ante fallos de runtimes Docker y procesos locales
 
@@ -1209,21 +1272,34 @@ Roadmap dividido en 4 versiones progresivas. Cada versión tiene un objetivo cla
 **Alcance:**
 - Resource Management completo: recursos compartidos entre proyectos, credenciales siempre cifradas (CU-08, CU-09)
 - Environment diffing: variables faltantes respecto a la plantilla, sin exponer valores marcados como secretos (CU-10)
-- Autenticación real con JWT — se activa lo que quedó preparado desde v0.1 (RF-01, RF-02, RF-03)
+- Autenticación JWT local con configuración de primer inicio desde la UI (RF-01, RF-02; multiusuario/roles siguen fuera de alcance)
 - Documentación del proyecto: README serio, diagramas, decisiones de arquitectura documentadas (listo para portafolio)
 
 **Qué aprendes técnicamente:**
 - Cifrado de credenciales en reposo
-- OAuth2/JWT implementado de forma completa (no un login casero)
+- JWT firmado con HS256, expiración y revocación server-side al cerrar sesión
 - Documentación técnica de un proyecto propio, de cara a terceros
 
 **Criterio de salida:** puedes explicar el proyecto completo en una entrevista técnica, en vivo, mostrando la aplicación corriendo de principio a fin.
+
+### Preparación para plugins externos (posterior a v1.0)
+
+El Plugin System de esta versión administra detectores incluidos en el classpath de DevVault. La instalación y ejecución de paquetes de terceros no forma parte de v1.0.
+
+Para conservar una ruta de evolución sin acoplar extensiones al núcleo:
+- Mantener los contratos de extensión fuera de entidades JPA, controladores y servicios internos de Spring.
+- Diseñar en una versión posterior un SDK/API independiente y versionado, con DTOs neutrales y capacidades declaradas.
+- Incorporar validación de identidad, versiones compatibles, dependencias y fallos por plugin al definir el cargador.
+- Elegir el modelo de confianza antes de ejecutar código externo. Un `ClassLoader` independiente no es un sandbox; el aislamiento real y los permisos quedan como decisiones pendientes.
+- No añadir endpoints de upload/instalación ni carga dinámica hasta aprobar ese contrato y su modelo de seguridad.
+
+La definición detallada del SDK, el empaquetado y el aislamiento se reserva para una versión posterior a v1.0.
 
 ---
 
 ## Notas de planificación
 
-- **La autenticación real queda deliberadamente al final (v1.0), no al principio.** No bloquea el valor central del producto, y el costo de activarla después es bajo porque el modelo `User` ya existe desde el ERD diseñado en la Fase 5.
+- La autenticación actual es local y de un solo administrador; no existe entidad `User`, registro, roles ni multiusuario. Estas funciones quedan para una evolución posterior.
 - **Cada versión cierra con un criterio de salida verificable**, no con una lista de checkboxes de features. Esto es lo que distingue un roadmap real de una lista de deseos, y es el tipo de disciplina de planificación que un entrevistador senior valora cuando le cuentas cómo abordaste el proyecto.
 - **El riesgo técnico más grande (Docker API) se valida al inicio de v0.2**, no se descubre a mitad de camino — validar riesgos temprano con spikes pequeños es una práctica de ingeniería madura.
 - Las duraciones son estimaciones para trabajo en ratos libres, no full-time — ajústalas según tu disponibilidad real; lo importante es el orden y los criterios de salida, no la fecha exacta.

@@ -6,7 +6,7 @@ DevVault es una plataforma local que descubre, entiende y administra los ecosist
 
 **Problema que resuelve:** cuando trabajas en varios proyectos, cada uno con su propio stack (Spring Boot, React, Postgres, Redis, Docker...), pierdes tiempo recordando cómo levantar cada uno, qué variables de entorno le faltan, o si un contenedor se cayó. DevVault centraliza eso.
 
-**Usuario objetivo (v1):** tú mismo, un desarrollador que trabaja con múltiples proyectos locales. No hay multiusuario real en el MVP — la capa de Identity existe para dejar la puerta abierta a una versión colaborativa futura.
+**Usuario objetivo (v1):** tú mismo, un desarrollador que trabaja con múltiples proyectos locales. La autenticación usa un administrador local creado en el primer inicio; no hay registro ni multiusuario.
 
 ---
 
@@ -34,7 +34,7 @@ Agrupados por bounded context, con prioridad (M = MVP 0.1, S = 0.2, L = 0.3+).
 | RF-07 | El sistema recorre recursivamente las carpetas de un Workspace | M |
 | RF-08 | El sistema detecta tecnología por archivos marcador (`pom.xml`, `package.json`, `composer.json`, etc.) | M |
 | RF-09 | El sistema genera un Project Profile (lenguaje, framework, versión) por cada proyecto encontrado | M |
-| RF-10 | El sistema permite extender la detección vía plugins sin tocar el núcleo | L |
+| RF-10 | El scanner admite extensiones internas mediante plugins; la instalación de plugins externos queda para una versión posterior | L |
 
 ### 2.4 Runtime Management
 | ID | Requisito | Prioridad |
@@ -72,7 +72,7 @@ Agrupados por bounded context, con prioridad (M = MVP 0.1, S = 0.2, L = 0.3+).
 ### 2.9 Plugin System
 | ID | Requisito | Prioridad |
 |---|---|---|
-| RF-24 | El núcleo expone una interfaz `TechnologyPlugin` para agregar detección de nuevos stacks | L |
+| RF-24 | El núcleo ofrece puntos de extensión para detectores incluidos; el SDK y la carga de plugins externos se definirán después de v1.0 | L |
 
 ---
 
@@ -93,18 +93,18 @@ Agrupados por bounded context, con prioridad (M = MVP 0.1, S = 0.2, L = 0.3+).
 
 ### CU-01 — Iniciar sesión
 - **Actor:** Usuario
-- **Precondición:** el usuario tiene una cuenta creada localmente
+- **Precondición:** si es el primer inicio, aún no existe un administrador local
 - **Flujo principal:**
-  1. El usuario envía email y contraseña
-  2. El sistema valida credenciales contra `User`
-  3. El sistema genera y devuelve un JWT
-- **Flujo alterno:** credenciales inválidas → `401 Unauthorized`, sin detalle de si el email existe (evitar user enumeration)
+  1. En el primer inicio, el usuario crea un administrador desde la UI
+  2. El sistema guarda el hash de contraseña y genera automáticamente la clave JWT local
+  3. En los siguientes inicios, valida las credenciales y emite un JWT HS256 de duración limitada
+- **Flujo alterno:** credenciales inválidas → `401 Unauthorized` genérico
 - **Postcondición:** el usuario queda autenticado para las siguientes peticiones
 
 ### CU-02 — Cerrar sesión
 - **Actor:** Usuario
 - **Precondición:** sesión activa (JWT válido)
-- **Flujo principal:** el cliente descarta el token; si se implementa blacklist de tokens, el sistema lo invalida server-side
+- **Flujo principal:** el sistema revoca el JWT actual server-side y el cliente elimina el token de su sesión
 - **Postcondición:** el token deja de ser aceptado por el sistema
 
 ### CU-03 — Crear y escanear un Workspace
@@ -559,10 +559,13 @@ Login local · Crear Workspace · Escanear proyectos · Detectar tecnologías (2
 Docker management (start/stop/restart) · Logs en vivo · Estado de servicios · Health checks
 
 **v0.3**
-Automation Engine · Sistema de plugins abierto · Monitoring CPU/RAM para Docker y procesos locales (árbol PID vía OSHI) · Alertas para ambos runtimes
+Automation Engine · Administración de plugins incluidos y puntos de extensión internos · Monitoring CPU/RAM para Docker y procesos locales (árbol PID vía OSHI) · Alertas para ambos runtimes
 
 **v1.0**
 Resource Management completo · Environment diffing · Plataforma estable, documentada, lista para uso diario real
+
+**Posterior a v1.0 — extensibilidad externa (por definir)**
+SDK público · descubrimiento/carga de paquetes externos · compatibilidad de versiones · modelo de confianza y aislamiento. El Plugin System actual administra plugins incluidos en el classpath; no instala ni ejecuta paquetes externos.
 
 ---
 
@@ -570,11 +573,13 @@ Resource Management completo · Environment diffing · Plataforma estable, docum
 
 Formato: `Como [rol], quiero [acción], para [beneficio]`, con criterios de aceptación en Gherkin y trazabilidad a los RF/CU definidos antes. Estimación en talla de camiseta (S/M/L) solo como referencia de esfuerzo relativo.
 
-### HU-01 — Acceder a la aplicación sin fricción
-**Como** desarrollador, **quiero** poder usar DevVault sin tener que crear una cuenta ni iniciar sesión, **para** empezar a usarla de inmediato en el MVP.
+### HU-01 — Configuración y acceso local de administrador
+**Como** desarrollador, **quiero** configurar una contraseña desde la UI en el primer inicio, **para** proteger DevVault sin editar variables del sistema.
 - **Criterios de aceptación:**
-  - Dado que abro DevVault por primera vez, cuando accedo a cualquier endpoint, entonces no se me pide autenticación
-  - Dado que el módulo Identity existe en el código, cuando reviso la configuración de seguridad, entonces está explícito que `permitAll()` es temporal (comentario o flag `auth.enabled=false`)
+  - El primer inicio permite crear un solo administrador; los siguientes presentan login
+  - Los endpoints `/api/**` exigen JWT válido salvo setup inicial, login, health y handshake de logs con ticket
+  - El JWT tiene expiración configurable y el cierre de sesión lo revoca hasta su expiración
+  - La UI conserva el token solo durante la sesión del navegador
 - **Prioridad:** Alta · **Estimación:** S
 - **Trazabilidad:** RF-01/RF-02 (diferidos), decisión de diseño de la conversación anterior
 
@@ -658,7 +663,7 @@ Formato: `Como [rol], quiero [acción], para [beneficio]`, con criterios de acep
 
 | HU | Prioridad | Estimación |
 |---|---|---|
-| HU-01 Acceso sin fricción | Alta | S |
+| HU-01 Configuración de administrador | Alta | S |
 | HU-02 Crear Workspace | Alta | S |
 | HU-03 Listar Workspaces | Media | S |
 | HU-04 Escanear Workspace | Alta | M |

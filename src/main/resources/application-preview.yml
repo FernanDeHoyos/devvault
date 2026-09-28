@@ -1,0 +1,14 @@
+server:
+  # La preview usa 5050 a propósito: deja libre el 8080 para que puedas tener
+  # el backend de desarrollo corriendo a la vez que pruebas el paquete.
+  port: ${DEVVAULT_PREVIEW_PORT:5050}
+
+spring:
+  datasource:
+    url: ${DEVVAULT_DB_URL:jdbc:postgresql://127.0.0.1:5434/devvault}
+  jpa:
+    show-sql: false
+
+logging:
+  level:
+    org.hibernate.SQL: WARN

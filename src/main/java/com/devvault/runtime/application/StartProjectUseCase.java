@@ -8,6 +8,7 @@ import com.devvault.discovery.plugin.TechnologyPlugin;
 import com.devvault.discovery.plugin.RunConfiguration;
 import com.devvault.shared.api.exception.ApiException;
 import com.devvault.runtime.domain.event.ProjectFailedEvent;
+import com.devvault.runtime.domain.event.ProjectStartedEvent;
 import com.github.dockerjava.api.model.ContainerPort;
 import com.devvault.runtime.domain.ServiceStatus;
 import com.devvault.runtime.infrastructure.ContainerRepository;
@@ -18,6 +19,7 @@ import com.devvault.runtime.infrastructure.RuntimeInstanceRepository;
 import com.devvault.runtime.infrastructure.ServiceRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -28,8 +30,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -52,12 +52,20 @@ public class StartProjectUseCase {
     private final ContainerRepository containerRepository;
     private final LocalProcessLogHub localProcessLogHub;
     private final LocalProcessManager localProcessManager;
+    private final LocalProcessHealthProbe localProcessHealthProbe;
     private final ApplicationEventPublisher eventPublisher;
 
     private final List<TechnologyPlugin> technologyPlugins;
 
+    /**
+     * Suelo del tiempo de espera del arranque. El valor que declara el plugin
+     * es un mínimo, no un tope: una primera ejecución de Maven o Gradle puede
+     * descargar la distribución y resolver todas las dependencias, y eso supera
+     * con facilidad los 120s que declaraba el plugin de Spring.
+     */
+    private final int baseStartupTimeoutSeconds;
+
     private static final Pattern ANSI_CODES = Pattern.compile("\u001B\\[[;\\d]*m");
-    private static final Pattern PORT_PATTERN = Pattern.compile("https?://(?:localhost|127\\.0\\.0\\.1):(\\d{2,5})");
 
     public StartProjectUseCase(ProjectLookupService projectLookupService,
             DockerComposeRunner composeRunner,
@@ -68,7 +76,9 @@ public class StartProjectUseCase {
             List<TechnologyPlugin> technologyPlugins,
             LocalProcessLogHub localProcessLogHub,
             LocalProcessManager localProcessManager,
-            ApplicationEventPublisher eventPublisher) {
+            LocalProcessHealthProbe localProcessHealthProbe,
+            ApplicationEventPublisher eventPublisher,
+            @Value("${devvault.runtime.startup-timeout-seconds:300}") int baseStartupTimeoutSeconds) {
         this.projectLookupService = projectLookupService;
         this.composeRunner = composeRunner;
         this.dockerClientAdapter = dockerClientAdapter;
@@ -78,7 +88,9 @@ public class StartProjectUseCase {
         this.technologyPlugins = technologyPlugins;
         this.localProcessLogHub = localProcessLogHub;
         this.localProcessManager = localProcessManager;
+        this.localProcessHealthProbe = localProcessHealthProbe;
         this.eventPublisher = eventPublisher;
+        this.baseStartupTimeoutSeconds = baseStartupTimeoutSeconds;
     }
 
     /**
@@ -172,8 +184,8 @@ public class StartProjectUseCase {
 
             log.info(">>> Proyecto local {} iniciado. PID: {}", projectId, pid);
 
-            AtomicInteger detectedPort = new AtomicInteger(-1);
-            drainProcessOutput(savedService.getId(), projectId, process, detectedPort);
+            PortSignals signals = new PortSignals();
+            drainProcessOutput(savedService.getId(), projectId, process, signals);
 
             Container container = containerRepository.findByServiceId(savedService.getId())
                     .map(existing -> {
@@ -185,16 +197,26 @@ public class StartProjectUseCase {
                     .orElseGet(() -> Container.localProcess(savedService.getId(), pid, commandText, "starting"));
             containerRepository.save(container);
 
-            boolean healthy = waitUntilLocalProcessHealthy(process, detectedPort, configuration.port());
+            int startupTimeoutSeconds = Math.max(
+                    configuration.startupTimeoutSeconds(), baseStartupTimeoutSeconds);
+            LocalProcessHealthProbe.Result probe = localProcessHealthProbe.awaitReady(
+                    process,
+                    signals,
+                    configuration.port(),
+                    startupTimeoutSeconds,
+                    () -> localProcessLogHub.recentLines(savedService.getId()));
+
+            boolean healthy = probe.healthy();
+            Integer finalPort = probe.port() != null ? probe.port() : configuration.port();
 
             log.info(
-                    ">>> [{}] Health check: {} | detectedPort: {} | assumedPort: {}",
+                    ">>> [{}] Health check: {} | puerto detectado: {} | puerto configurado: {} | timeout: {}s",
                     projectId,
                     healthy,
-                    detectedPort.get(),
-                    configuration.port());
-            Integer finalPort = detectedPort.get() > 0 ? detectedPort.get() : configuration.port();
-            if (!finalPort.equals(savedService.getPort())) {
+                    probe.port(),
+                    configuration.port(),
+                    startupTimeoutSeconds);
+            if (!java.util.Objects.equals(finalPort, savedService.getPort())) {
                 savedService.updatePort(finalPort);
             }
 
@@ -210,8 +232,9 @@ public class StartProjectUseCase {
 
             if (healthy) {
                 instance.markRunning();
+                eventPublisher.publishEvent(new ProjectStartedEvent(projectId));
             } else {
-                String reason = "El proceso local no respondió en ningún puerto detectable";
+                String reason = probe.failureReason();
                 instance.markFailed(reason);
                 eventPublisher.publishEvent(new ProjectFailedEvent(projectId, reason));
             }
@@ -244,92 +267,6 @@ public class StartProjectUseCase {
                 alive);
 
         return alive;
-    }
-
-    private boolean waitUntilLocalProcessHealthy(
-            Process process,
-            AtomicInteger detectedPort,
-            int configuredPort) {
-
-        long timeout = System.currentTimeMillis() + 30_000;
-
-        while (System.currentTimeMillis() < timeout) {
-
-            // El proceso murió
-            if (!process.isAlive()) {
-                return false;
-            }
-
-            int port = detectedPort.get();
-
-            // Todavía no sabemos qué puerto está usando
-            if (port <= 0) {
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return false;
-                }
-
-                continue;
-            }
-
-            log.info(
-                    ">>> Puerto detectado para el proceso: {}",
-                    port);
-
-            if (isPortOpen(port)) {
-                return true;
-            }
-
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
-        }
-
-        return false;
-    }
-
-    private boolean isPortOpen(int port) {
-
-        boolean ipv4 = tryConnect("127.0.0.1", port);
-        log.info(">>> tryConnect 127.0.0.1:{} -> {}", port, ipv4);
-
-        if (ipv4) {
-            return true;
-        }
-
-        boolean ipv6 = tryConnect("::1", port);
-        log.info(">>> tryConnect ::1:{} -> {}", port, ipv6);
-
-        if (ipv6) {
-            return true;
-        }
-
-        boolean localhost = tryConnect("localhost", port);
-        log.info(">>> tryConnect localhost:{} -> {}", port, localhost);
-
-        return localhost;
-    }
-
-    private boolean tryConnect(String host, int port) {
-        try (java.net.Socket socket = new java.net.Socket()) {
-            socket.connect(
-                    new java.net.InetSocketAddress(host, port),
-                    1000);
-            return true;
-        } catch (Exception e) {
-            log.info(
-                    ">>> tryConnect {}:{} falló: {} - {}",
-                    host,
-                    port,
-                    e.getClass().getSimpleName(),
-                    e.getMessage());
-            return false;
-        }
     }
 
     /**
@@ -440,6 +377,7 @@ public class StartProjectUseCase {
 
         if (allHealthy) {
             instance.markRunning();
+            eventPublisher.publishEvent(new ProjectStartedEvent(projectId));
         } else {
             String reason = "Servicio '" +
                             failedServiceName +
@@ -530,31 +468,19 @@ public class StartProjectUseCase {
     }
 
     /**
-     * Health check para procesos locales: confirma que el proceso del SO
-     * sigue vivo Y, si se conoce el puerto declarado, que ya acepta conexiones.
-     * Equivalente a waitUntilRunning() de la rama Docker.
+     * Lee la salida del proceso, la publica para el WebSocket de logs y la
+     * analiza para detectar el puerto por el que realmente escucha.
+     *
+     * <p>Este hilo es también el que evita que el proceso se cuelgue: si nadie
+     * consume el {@code stdout}/{@code stderr} del hijo, el pipe del sistema
+     * operativo se llena y el proceso queda bloqueado sin llegar a arrancar.
+     *
+     * @param serviceId ID del servicio, para indexar el buffer de logs
+     * @param projectId ID del proyecto, solo para el log del backend
+     * @param process   proceso local ya lanzado
+     * @param signals   señales de puerto alimentadas con cada línea
      */
-    private boolean waitUntilLocalProcessHealthy(Process process, Integer expectedPort) {
-        for (int attempt = 0; attempt < HEALTH_CHECK_ATTEMPTS; attempt++) {
-            if (!process.isAlive()) {
-                return false; // se cayó (ej. error de sintaxis, dependencia faltante)
-            }
-            if (expectedPort == null || isPortOpen(expectedPort)) {
-                return true;
-            }
-            sleep();
-        }
-        return false;
-    }
-
-    /**
-     * Lee la salida del proceso y detecta el puerto.
-     * 
-     * @param serviceId    ID del proyecto
-     * @param process      Proceso
-     * @param detectedPort Puerto detectado
-     */
-    private void drainProcessOutput(UUID serviceId, UUID projectId, Process process, AtomicInteger detectedPort) {
+    private void drainProcessOutput(UUID serviceId, UUID projectId, Process process, PortSignals signals) {
         Thread reader = new Thread(() -> {
             try (var bufferedReader = new java.io.BufferedReader(
                     new java.io.InputStreamReader(process.getInputStream()))) {
@@ -564,16 +490,12 @@ public class StartProjectUseCase {
 
                     log.info(">>> [{}] {}", projectId, cleanLine);
                     localProcessLogHub.publish(serviceId, cleanLine);
-
-                    Matcher matcher = PORT_PATTERN.matcher(cleanLine);
-                    if (matcher.find()) {
-                        detectedPort.set(Integer.parseInt(matcher.group(1)));
-                    }
+                    signals.observe(cleanLine);
                 }
             } catch (IOException e) {
                 log.debug(">>> Stream de salida del proceso local cerrado: {}", projectId);
             }
-        });
+        }, "local-process-output-" + projectId);
         reader.setDaemon(true);
         reader.start();
     }

@@ -46,7 +46,7 @@ public class RuntimeController {
      * @return Instancia del runtime
      */
     @PostMapping("/start")
-    public ResponseEntity<RuntimeInstanceResponse> start(@PathVariable UUID id) {
+    public ResponseEntity<RuntimeInstanceResponse> start(@PathVariable("id") UUID id) {
         RuntimeInstance instance = startProjectUseCase.execute(id);
         return ResponseEntity.ok(RuntimeInstanceResponse.from(instance));
     }
@@ -58,7 +58,7 @@ public class RuntimeController {
      * @return Instancia del runtime
      */
     @PostMapping("/stop")
-    public ResponseEntity<RuntimeInstanceResponse> stop(@PathVariable UUID id) {
+    public ResponseEntity<RuntimeInstanceResponse> stop(@PathVariable("id") UUID id) {
         RuntimeInstance instance = stopProjectUseCase.execute(id);
         return ResponseEntity.ok(RuntimeInstanceResponse.from(instance));
     }
@@ -70,7 +70,7 @@ public class RuntimeController {
      * @return Instancia del runtime
      */
     @GetMapping("/status")
-    public RuntimeInstanceResponse status(@PathVariable UUID id) {
+    public RuntimeInstanceResponse status(@PathVariable("id") UUID id) {
         return runtimeInstanceRepository.findFirstByProjectIdOrderByStartedAtDesc(id)
                 .map(RuntimeInstanceResponse::from)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
@@ -84,7 +84,7 @@ public class RuntimeController {
      * @return Lista de servicios
      */
     @GetMapping("/services")
-    public List<ServiceResponse> services(@PathVariable UUID id) {
+    public List<ServiceResponse> services(@PathVariable("id") UUID id) {
         List<Service> services = serviceRepository.findByProjectId(id);
         return services.stream()
                 .map(service -> {

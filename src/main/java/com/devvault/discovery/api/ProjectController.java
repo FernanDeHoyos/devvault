@@ -94,7 +94,7 @@ public List<ProjectResponse> findAll(
      * @throws RuntimeException si el proyecto no es encontrado
      */
     @GetMapping("/{id}")
-    public ProjectResponse findById(@PathVariable UUID id) {
+    public ProjectResponse findById(@PathVariable("id") UUID id) {
         Project project = projectRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Project not found with id: " + id));
 
@@ -107,15 +107,15 @@ public List<ProjectResponse> findAll(
 
 
     @GetMapping("/{id}/metrics")
-    public List<ContainerMetricsResponse> metrics(@PathVariable UUID id,
-                                                   @RequestParam(required = false) UUID serviceId,
-                                                   @RequestParam(required = false) String containerId) {
+    public List<ContainerMetricsResponse> metrics(@PathVariable("id") UUID id,
+                                                   @RequestParam(name = "serviceId", required = false) UUID serviceId,
+                                                   @RequestParam(name = "containerId", required = false) String containerId) {
         return monitoringService.metrics(id, serviceId, containerId);
     }
 
     /** Returns statically discovered HTTP mappings in the project's source files. */
     @GetMapping("/{id}/routes")
-    public List<ProjectRouteResponse> routes(@PathVariable UUID id) {
+    public List<ProjectRouteResponse> routes(@PathVariable("id") UUID id) {
         Project project = projectRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Project not found with id: " + id));
         return routeScanner.scan(Path.of(project.getPath()));
@@ -123,7 +123,7 @@ public List<ProjectResponse> findAll(
 
     /** Deletes the project from DevVault while preserving its files on disk. */
     @DeleteMapping("/{id}")
-    public org.springframework.http.ResponseEntity<Void> delete(@PathVariable UUID id) {
+    public org.springframework.http.ResponseEntity<Void> delete(@PathVariable("id") UUID id) {
         projectDeletionService.delete(id);
         return org.springframework.http.ResponseEntity.noContent().build();
     }

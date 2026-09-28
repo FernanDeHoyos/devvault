@@ -1,10 +1,14 @@
 package com.devvault.discovery.plugin;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -30,6 +34,10 @@ public class SpringBootPlugin implements TechnologyPlugin {
     private static final Pattern GRADLE_BOOT_DEPENDENCY = Pattern.compile(
             "org\\.springframework\\.boot:spring-boot-[\\w.-]+|org\\.springframework\\.boot\\s*[:.]\\s*spring-boot-[\\w.-]+",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern PROPERTIES_SERVER_PORT = Pattern.compile(
+            "(?m)^\\s*server\\.port\\s*[=:]\\s*(?:\\$\\{[^}:]+:)?(\\d{1,5})\\}?.*$");
+    private static final Pattern YAML_PORT = Pattern.compile(
+            "^port\\s*:\\s*(?:['\"]?)(?:\\$\\{[^}:]+:)?(\\d{1,5})\\}?['\"]?\\s*(?:#.*)?$");
     private static final List<String> BUILD_FILES = List.of("pom.xml", "build.gradle", "build.gradle.kts");
 
     @Override
@@ -73,6 +81,139 @@ public class SpringBootPlugin implements TechnologyPlugin {
         markers.put("buildSystem", hasMaven ? "Maven" : "Gradle");
         markers.put("buildFiles", BUILD_FILES.stream().filter(name -> Files.isRegularFile(projectDir.resolve(name))).toList());
         return Optional.of(new DetectionResult("Java", framework, springBootDetected ? bootVersion : null, markers));
+    }
+
+    @Override
+    public Optional<RunConfiguration> getRunConfiguration(Path projectDir) {
+        DetectionResult detection = detect(projectDir).orElse(null);
+        if (detection == null || !"Spring Boot".equals(detection.framework())) {
+            return Optional.empty();
+        }
+
+        int configuredPort = configuredServerPort(projectDir);
+        boolean useDynamicPort = configuredPort > 0 && !isPortAvailable(configuredPort);
+        int runtimePort = useDynamicPort ? 0 : configuredPort;
+
+        if (Files.isRegularFile(projectDir.resolve("pom.xml"))) {
+            return Optional.of(new RunConfiguration("app", mavenCommand(projectDir, useDynamicPort), runtimePort, 120));
+        }
+        if (Files.isRegularFile(projectDir.resolve("build.gradle"))
+                || Files.isRegularFile(projectDir.resolve("build.gradle.kts"))) {
+            return Optional.of(new RunConfiguration("app", gradleCommand(projectDir, useDynamicPort), runtimePort, 120));
+        }
+        return Optional.empty();
+    }
+
+    private List<String> mavenCommand(Path projectDir, boolean useDynamicPort) {
+        boolean windows = isWindows();
+        String wrapper = windows ? "mvnw.cmd" : "mvnw";
+        List<String> command = new ArrayList<>();
+        if (Files.isRegularFile(projectDir.resolve(wrapper))) {
+            if (windows) command.addAll(List.of("cmd.exe", "/c", wrapper));
+            else command.addAll(List.of("sh", "./" + wrapper));
+        } else if (windows) {
+            command.addAll(List.of("cmd.exe", "/c", "mvn.cmd"));
+        } else {
+            command.add("mvn");
+        }
+        command.add("-B");
+        if (useDynamicPort) command.add("-Dspring-boot.run.arguments=--server.port=0");
+        command.add("spring-boot:run");
+        return List.copyOf(command);
+    }
+
+    private List<String> gradleCommand(Path projectDir, boolean useDynamicPort) {
+        boolean windows = isWindows();
+        String wrapper = windows ? "gradlew.bat" : "gradlew";
+        List<String> command = new ArrayList<>();
+        if (Files.isRegularFile(projectDir.resolve(wrapper))) {
+            if (windows) command.addAll(List.of("cmd.exe", "/c", wrapper));
+            else command.addAll(List.of("sh", "./" + wrapper));
+        } else if (windows) {
+            command.addAll(List.of("cmd.exe", "/c", "gradle.bat"));
+        } else {
+            command.add("gradle");
+        }
+        command.add("--console=plain");
+        command.add("bootRun");
+        if (useDynamicPort) command.add("--args=--server.port=0");
+        return List.copyOf(command);
+    }
+
+    private int configuredServerPort(Path projectDir) {
+        Path resources = projectDir.resolve("src/main/resources");
+        if (!Files.isDirectory(resources)) return 8080;
+        try (var files = Files.list(resources)) {
+            List<Path> configFiles = files
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().matches("application(?:-[^.]+)?\\.(?:properties|ya?ml)"))
+                    .sorted(java.util.Comparator.comparingInt(path -> {
+                        String name = path.getFileName().toString();
+                        return name.equals("application.properties") ? 0
+                                : name.equals("application.yml") ? 1
+                                        : name.equals("application.yaml") ? 2 : 3;
+                    }))
+                    .toList();
+            for (Path configFile : configFiles) {
+                String content = Files.readString(configFile);
+                Matcher propertiesMatcher = PROPERTIES_SERVER_PORT.matcher(content);
+                if (propertiesMatcher.find()) return validPort(propertiesMatcher.group(1));
+                Integer yamlPort = readYamlServerPort(content);
+                if (yamlPort != null) return yamlPort;
+            }
+        } catch (IOException ignored) {
+            // Fall back to Spring Boot's standard port when configuration is unreadable.
+        }
+        return 8080;
+    }
+
+    private Integer readYamlServerPort(String content) {
+        boolean inServerSection = false;
+        int serverIndent = -1;
+        for (String line : content.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+            if (trimmed.equals("---")) {
+                inServerSection = false;
+                serverIndent = -1;
+                continue;
+            }
+            int indent = line.length() - line.stripLeading().length();
+            if (!inServerSection && trimmed.matches("server\\s*:\\s*(?:#.*)?")) {
+                inServerSection = true;
+                serverIndent = indent;
+                continue;
+            }
+            if (!inServerSection) continue;
+            if (indent <= serverIndent) {
+                inServerSection = false;
+                serverIndent = -1;
+                continue;
+            }
+            Matcher portMatcher = YAML_PORT.matcher(trimmed);
+            if (portMatcher.matches()) return validPort(portMatcher.group(1));
+        }
+        return null;
+    }
+
+    private int validPort(String value) {
+        int port = Integer.parseInt(value);
+        return port >= 0 && port <= 65535 ? port : 8080;
+    }
+
+    private boolean isPortAvailable(int port) {
+        if (port == 0) return true;
+        try (ServerSocket socket = new ServerSocket()) {
+            socket.setReuseAddress(false);
+            socket.bind(new InetSocketAddress("127.0.0.1", port));
+            return true;
+        } catch (IOException ignored) {
+            return false;
+        }
+    }
+
+    private boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
     private boolean readIfPresent(Path file, Map<String, Object> markers) {

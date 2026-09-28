@@ -60,7 +60,7 @@ public class WorkspaceController {
      * @return el espacio de trabajo encontrado
      */
     @GetMapping("/{id}")
-    public WorkspaceResponse findById(@PathVariable UUID id) {
+    public WorkspaceResponse findById(@PathVariable("id") UUID id) {
         return workspaceService.findById(id);
     }
 

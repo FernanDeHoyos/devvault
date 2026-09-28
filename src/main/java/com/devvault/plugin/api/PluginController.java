@@ -44,7 +44,7 @@ public class PluginController {
      * @return Plugin actualizado
      */
     @PatchMapping("/{id}")
-    public PluginResponse update(@PathVariable UUID id, @RequestBody UpdatePluginRequest request) {
+    public PluginResponse update(@PathVariable("id") UUID id, @RequestBody UpdatePluginRequest request) {
         PluginDescriptor descriptor = repository.findById(id)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Plugin no encontrado: " + id));
 

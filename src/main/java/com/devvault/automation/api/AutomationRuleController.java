@@ -33,17 +33,17 @@ public class AutomationRuleController {
     }
 
     @GetMapping("/{id}")
-    public RuleResponse findById(@PathVariable UUID id) {
+    public RuleResponse findById(@PathVariable("id") UUID id) {
         return ruleService.findById(id);
     }
 
     @PatchMapping("/{id}")
-    public RuleResponse update(@PathVariable UUID id, @RequestBody UpdateRuleRequest request) {
+    public RuleResponse update(@PathVariable("id") UUID id, @RequestBody UpdateRuleRequest request) {
         return ruleService.update(id, request);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
+    public ResponseEntity<Void> delete(@PathVariable("id") UUID id) {
         ruleService.delete(id);
         return ResponseEntity.noContent().build();
     }

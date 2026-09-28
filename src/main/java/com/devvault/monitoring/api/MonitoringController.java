@@ -18,13 +18,13 @@ public class MonitoringController {
     public MonitoringController(MonitoringService monitoringService) { this.monitoringService = monitoringService; }
 
     @GetMapping
-    public List<AlertResponse> alerts(@RequestParam(required = false) AlertStatus status,
-                                     @RequestParam(required = false) UUID projectId) {
+    public List<AlertResponse> alerts(@RequestParam(name = "status", required = false) AlertStatus status,
+                                     @RequestParam(name = "projectId", required = false) UUID projectId) {
         return monitoringService.findAlerts(status, projectId);
     }
 
     @PatchMapping("/{id}")
-    public AlertResponse resolve(@PathVariable UUID id, @Valid @RequestBody ResolveAlertRequest request) {
+    public AlertResponse resolve(@PathVariable("id") UUID id, @Valid @RequestBody ResolveAlertRequest request) {
         return monitoringService.resolveAlert(id, request.resolved());
     }
 }

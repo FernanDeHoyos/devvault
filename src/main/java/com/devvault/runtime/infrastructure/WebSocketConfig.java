@@ -11,15 +11,18 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final LogWebSocketHandler logWebSocketHandler;
+    private final LogWebSocketTicketInterceptor ticketInterceptor;
 
-    public WebSocketConfig(LogWebSocketHandler logWebSocketHandler) {
+    public WebSocketConfig(LogWebSocketHandler logWebSocketHandler, LogWebSocketTicketInterceptor ticketInterceptor) {
         this.logWebSocketHandler = logWebSocketHandler;
+        this.ticketInterceptor = ticketInterceptor;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         // El patrón coincide con /api/v1/projects/{cualquier-uuid}/logs
         registry.addHandler(logWebSocketHandler, "/api/v1/projects/*/logs")
-                .setAllowedOrigins("*"); // en dev; restringir en v1.0 si se expone más allá de localhost
+                .addInterceptors(ticketInterceptor)
+                .setAllowedOrigins("http://localhost:5050", "http://127.0.0.1:5050");
     }
 }

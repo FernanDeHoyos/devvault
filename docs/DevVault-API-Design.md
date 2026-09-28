@@ -4,7 +4,8 @@
 
 - **Base path:** `/api/v1`
 - **Formato:** JSON en request y response, `Content-Type: application/json`
-- **Auth (cuando se active, ver HU-01):** `Authorization: Bearer {jwt}`
+- **Auth:** todos los endpoints `/api/**` requieren `Authorization: Bearer {accessToken}`, excepto login, setup y recuperación local (solo loopback), health y el handshake de logs autorizado con ticket de un solo uso.
+- **Configuración inicial:** el primer inicio permite crear un único administrador desde loopback. La contraseña y la clave de recuperación se almacenan como hashes; la clave JWT se genera y persiste en la carpeta de configuración del usuario.
 - **IDs:** UUID en formato string
 - **Fechas:** ISO-8601 con timezone (`2026-08-13T14:30:00Z`)
 - **Paginación** (en endpoints de listado que puedan crecer mucho): query params `page` (default 0) y `size` (default 20), respuesta envuelta:
@@ -33,30 +34,50 @@
 
 ## 1. Identity
 
+### `GET /auth/setup-status`
+Indica si falta crear el administrador local. Es público para dirigir la UI al asistente inicial.
+**Response `200`:** `{ "setupRequired": true, "recoveryConfigured": false }`
+
+### `POST /auth/setup`
+Crea el administrador local una sola vez. Solo acepta conexiones loopback; username de 3–64 caracteres, contraseña de 12–128 y clave de recuperación aleatoria confirmada por la UI.
+**Request:** `{ "username": "dev", "password": "••••••••••••", "recoveryKey": "<clave aleatoria>" }`
+**Response:** `204 No Content` · `409` si ya se configuró un administrador.
+
+### `POST /auth/recover`
+Restablece la contraseña local con username y clave de recuperación. Solo acepta conexiones loopback. Incrementa la versión de credenciales, invalidando de inmediato los JWT de sesiones anteriores.
+**Request:** `{ "username": "dev", "recoveryKey": "<clave aleatoria>", "newPassword": "••••••••••••" }`
+**Response:** `204 No Content` · `401` si la clave no coincide o no hay una clave configurada.
+
 ### `POST /auth/login`
-Autentica al usuario y devuelve un JWT.
+Autentica al administrador local configurado en el primer inicio y devuelve un JWT.
 
 **Request:**
 ```json
-{ "email": "dev@local.com", "password": "••••••••" }
+{ "username": "dev", "password": "••••••••" }
 ```
 **Response `200`:**
 ```json
-{ "token": "eyJhbGciOi...", "expiresAt": "2026-08-13T22:30:00Z" }
+{ "accessToken": "eyJhbGciOi...", "tokenType": "Bearer", "expiresAt": "...", "username": "dev" }
 ```
-**Errores:** `401` credenciales inválidas (mensaje genérico, sin revelar si el email existe — regla de negocio de Identity)
+JWT HS256, emisor `devvault`, vigencia por defecto de 20 minutos.
+**Errores:** `401` credenciales inválidas (mensaje genérico).
 
 ### `POST /auth/logout`
-Invalida la sesión actual (si se implementa blacklist de tokens).
+Revoca server-side el JWT actual hasta que expire.
 **Response:** `204 No Content`
 
 ### `GET /auth/me`
-Devuelve el perfil del usuario autenticado.
+Devuelve el nombre del administrador autenticado.
 **Response `200`:**
 ```json
-{ "id": "uuid", "email": "dev@local.com", "role": "USER", "createdAt": "..." }
+{ "username": "dev" }
 ```
 **Errores:** `401` sin token o token inválido
+
+### `POST /auth/ws-ticket`
+Emite un ticket aleatorio, de un solo uso y válido durante 30 segundos para un par proyecto/servicio. El cliente lo presenta en la query del WebSocket de logs; el JWT nunca se envía en la URL.
+**Request:** `{ "projectId": "uuid", "serviceName": "api" }`
+**Response `200`:** `{ "ticket": "...", "expiresAt": "..." }`
 
 ---
 
@@ -213,8 +234,8 @@ Lista los `Service` + `Container` del proyecto. Desde la extensión de ejecució
 ```
 `port` refleja el puerto **real** detectado en la salida del proceso (no necesariamente el asumido por convención — ver nota de diseño en 5.1 sobre por qué el puerto asumido no es confiable).
 
-### `WS /projects/{id}/logs?service={serviceId}`
-Canal WebSocket de streaming de logs en vivo (CU-07).
+### `WS /projects/{id}/logs?service={serviceName}&ticket={ticket}`
+Canal WebSocket de streaming de logs en vivo (CU-07). Requiere un ticket recién emitido por `POST /auth/ws-ticket`; un ticket solo permite un handshake y queda ligado al proyecto/servicio.
 **Mensajes emitidos (servidor → cliente):**
 ```json
 { "timestamp": "...", "level": "INFO", "message": "Started BarberApplication in 2.1s" }
@@ -280,18 +301,20 @@ Crea una regla (CU-11).
 **Request:**
 ```json
 {
-  "name": "Notificar caída de contenedor",
-  "projectId": "uuid",
-  "trigger": { "eventType": "ContainerFailedEvent" },
-  "conditions": [{ "expression": "service.type == 'DATABASE'" }],
-  "actions": [{ "actionType": "NOTIFY", "params": { "channel": "desktop" } }]
+  "name": "Registrar fallo de arranque",
+  "projectId": null,
+  "triggers": [{ "eventType": "ProjectFailedEvent" }],
+  "conditions": [{ "expression": "#reason.contains('puerto')" }],
+  "actions": [{ "actionType": "LOG", "params": { "message": "Falló #{projectId}: #{reason}" } }]
 }
 ```
 **Response `201`:** la regla creada con su `id`
-**Errores:** `400` si no se envía al menos un `trigger` (invariante de negocio)
+**Eventos implementados:** `ProjectFailedEvent` (fallo de inicio local o Docker) y `ProjectStartedEvent` (inicio correcto local o Docker). El contexto comparte `#projectId`; `#reason` solo está disponible al fallar.
+**Acciones implementadas:** `LOG`, escribe el mensaje en el log del backend. Todavía no envía notificaciones ni ejecuta comandos.
+**Errores:** `400` si no se envía al menos un `trigger` y una `action` (invariante de negocio).
 
 ### `GET /automation/rules`
-Lista reglas, filtrable por `projectId` y `enabled`.
+Lista todas las reglas. El alcance por proyecto se configura con `projectId`; `null` significa todos los proyectos.
 
 ### `GET /automation/rules/{id}`
 Detalle completo con triggers, condiciones y acciones.
@@ -332,6 +355,8 @@ Marca una alerta como resuelta manualmente.
 
 ## 9. Plugin System
 
+En el estado actual, estos endpoints administran los plugins incluidos y registrados en el classpath de DevVault. No instalan JARs, cargan código en caliente ni representan todavía una API pública para plugins externos.
+
 ### `GET /plugins`
 Lista los `PluginDescriptor` registrados (detectores de tecnología).
 **Response `200`:**
@@ -345,13 +370,65 @@ Habilita/deshabilita un plugin de detección.
 
 ---
 
+## 9bis. Editor de código
+
+Abre un proyecto en el editor instalado en la máquina. El editor se lanza como
+proceso desacoplado: no se registra en el runtime, no genera `RuntimeInstance` ni
+`Container`, no publica eventos y no se puede detener desde DevVault. El sistema
+operativo es su dueño y sobrevive al cierre de DevVault.
+
+El editor se resuelve por orden: el que indica la petición → el configurado en
+`devvault.editor.default-editor` → el primero disponible que se detecte. Si el
+elegido no está instalado, la operación falla con `422` en vez de abrir en otro.
+
+### `GET /editors`
+Lista los editores conocidos y cuáles están disponibles en esta máquina. No
+ejecuta nada: solo comprueba que el ejecutable exista, para no abrir una ventana
+del IDE cada vez que la UI pinta la lista.
+**Response `200`:**
+```json
+{
+  "editors": [
+    { "id": "vscode", "displayName": "Visual Studio Code", "available": true,
+      "executablePath": "C:\\Users\\user\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code.cmd", "isDefault": true },
+    { "id": "intellij", "displayName": "IntelliJ IDEA", "available": false,
+      "executablePath": null, "isDefault": false }
+  ],
+  "defaultId": "vscode",
+  "configuredId": "vscode"
+}
+```
+`defaultId` es el que se usaría ahora mismo. `configuredId` es lo que dice la
+configuración, que puede no coincidir con `defaultId` si el configurado no está
+instalado.
+
+### `POST /projects/{id}/open`
+Abre la carpeta del proyecto en el editor. El editor va como query param, no en
+el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
+**Response `200`:** `{ "projectId": "uuid", "projectName": "...", "editorId": "vscode", "editorName": "Visual Studio Code", "executablePath": "..." }`
+**Errores:**
+- `404` el proyecto no existe
+- `422` la carpeta del proyecto ya no está en disco (workspace obsoleto, hay que reescanear)
+- `422` editor desconocido, o conocido pero no instalado en esta máquina
+
+> El editor se busca como nombre en el `PATH`, como ruta absoluta (expandiendo
+> `%VARIABLE%` de Windows) o con un comodín, porque la carpeta de instalación de
+> IntelliJ incluye la versión. Los editores de terminal (Neovim, Vim) no están:
+> sin consola adjunta no sobreviven a `ProcessBuilder`.
+
+---
+
 ## 10. Resumen de endpoints (referencia rápida)
 
 | Método | Ruta | Módulo | Caso de uso |
 |---|---|---|---|
 | POST | `/auth/login` | Identity | CU-01 |
+| GET | `/auth/setup-status` | Identity | CU-01 |
+| POST | `/auth/setup` | Identity | CU-01 |
+| POST | `/auth/recover` | Identity | Recuperar el acceso local con la clave de recuperación |
 | POST | `/auth/logout` | Identity | CU-02 |
 | GET | `/auth/me` | Identity | — |
+| POST | `/auth/ws-ticket` | Identity | CU-07 |
 | POST | `/workspaces` | Workspace | CU-03 |
 | GET | `/workspaces` | Workspace | — |
 | GET | `/workspaces/{id}` | Workspace | — |
@@ -388,8 +465,10 @@ Habilita/deshabilita un plugin de detección.
 | PATCH | `/alerts/{id}` | Monitoring | — |
 | GET | `/plugins` | Plugin | — |
 | PATCH | `/plugins/{id}` | Plugin | — |
+| GET | `/editors` | Editor | — |
+| POST | `/projects/{id}/open` | Editor | — |
 
-**Total: 36 endpoints** (35 REST + 1 WebSocket) que cubren el 100% de las HU del MVP 0.1 y dejan la estructura lista para 0.2 y 0.3 sin rediseñar nada.
+**Total: 42 endpoints** (41 REST + 1 WebSocket), incluyendo configuración inicial, recuperación, autorización de logs y apertura en el editor.
 
 ---
 
@@ -397,9 +476,10 @@ Habilita/deshabilita un plugin de detección.
 
 | Versión | Endpoints a implementar |
 |---|---|
-| **0.1 (MVP)** | Workspace completo, Project (lectura), Auth simplificado (`permitAll`, sin login real) |
+| **0.1 (MVP)** | Workspace completo, Project (lectura) |
 | **0.2** | Runtime completo (start/stop/status/services/logs vía WS) |
 | **0.3** | Automation, Monitoring, Plugin |
-| **1.0** | Resource Management, Environment diffing, autenticación real con JWT y estabilización/documentación |
+| **1.0** | Resource Management, Environment diffing, autenticación JWT local y estabilización/documentación |
+| **Posterior a 1.0** | Preferencia de editor por proyecto, abrir archivo y línea desde el catálogo de rutas, acción de automatización `OPEN_EDITOR` |
 
 Con esto ya tienes el contrato completo antes de escribir un solo `@RestController`.

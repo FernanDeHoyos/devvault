@@ -3,9 +3,9 @@ spring:
     name: devvault
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/devvault
-    username: devvault
-    password: devvault_dev
+    url: ${DEVVAULT_DB_URL:jdbc:postgresql://127.0.0.1:5433/devvault}
+    username: ${DEVVAULT_DB_USERNAME:devvault}
+    password: ${DEVVAULT_DB_PASSWORD:devvault_dev}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -23,6 +23,26 @@ spring:
 
 server:
   port: 8080
+  address: ${DEVVAULT_BIND_ADDRESS:127.0.0.1}
+
+devvault:
+  auth:
+    token-duration-minutes: ${DEVVAULT_JWT_DURATION_MINUTES:20}
+  runtime:
+    # Suelo del tiempo de espera del arranque de un proceso local. El valor que
+    # declara cada plugin es un mínimo adicional, no un tope: una primera
+    # ejecución de Maven o Gradle descarga la distribución y resuelve todas las
+    # dependencias, y eso puede tardar bastante más que un arranque en caliente.
+    startup-timeout-seconds: ${DEVVAULT_STARTUP_TIMEOUT_SECONDS:300}
+  editor:
+    # Editor de código con el que se abren los proyectos. Valores: vscode,
+    # vscode-insiders, intellij, sublime, zed, notepad. Si el editor indicado no
+    # está instalado, DevVault usa el primero que detecte disponible en vez de
+    # fallar. La preferencia por proyecto llega en una fase posterior.
+    # La clave es 'default-editor' y no 'default' a propósito: el binding
+    # relajado de Spring lo liga al componente defaultEditor del record. Con
+    # 'default' no habría error, simplemente se ignoraría en silencio.
+    default-editor: ${DEVVAULT_DEFAULT_EDITOR:vscode}
 
 logging:
   level:

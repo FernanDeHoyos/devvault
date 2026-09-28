@@ -23,6 +23,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
 	// Métricas de procesos locales en Windows/macOS/Linux (JNA).
 	implementation 'com.github.oshi:oshi-core:7.6.1'
 	implementation 'org.flywaydb:flyway-database-postgresql'
@@ -50,6 +52,20 @@ tasks.named('test') {
 	useJUnitPlatform()
 }
 
+// The Windows preview can embed the separately built React UI in the Boot JAR.
+// Ordinary backend builds remain independent from the UI repository.
+def previewUiDir = providers.gradleProperty('previewUiDir')
+tasks.named('processResources') {
+	if (previewUiDir.isPresent()) {
+		from(file(previewUiDir.get())) {
+			into 'static'
+		}
+	}
+}
+
 tasks.withType(JavaCompile).configureEach {
+	// Redundante en Gradle: el plugin de Spring Boot ya añade -parameters.
+	// Se mantiene explícito porque el proyecto también se compila desde IDEs
+	// (Eclipse/STS), donde el flag solo existe si se configura en .settings.
 	options.compilerArgs << '-parameters'
 }

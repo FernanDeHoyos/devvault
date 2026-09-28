@@ -1,0 +1,55 @@
+DEVVAULT PREVIEW PARA WINDOWS
+
+REQUISITOS
+- Windows 10/11 de 64 bits.
+- Docker Desktop instalado e iniciado. DevVault lo usa para PostgreSQL y para controlar contenedores de proyectos.
+- Git en PATH si quieres usar las funciones Git.
+- Node.js/npm o PHP/Composer solo si vas a iniciar proyectos locales de esos stacks.
+- Un JDK instalado y alcanzable desde JAVA_HOME o desde el PATH si vas a iniciar
+  proyectos Java. Ver la sección "PROYECTOS JAVA" más abajo.
+
+INICIO
+1. Extrae la carpeta DevVault en una ubicación permanente.
+2. Haz doble clic en Iniciar-DevVault.bat.
+3. Se abre el navegador en http://localhost:5050/login
+4. En el primer inicio, crea tu contraseña y guarda la clave de recuperación que
+   muestra la UI.
+
+DIRECCIÓN
+- La preview sirve la UI y la API en el mismo origen, en el puerto 5050. Usa el
+  5050 y no el 8080 para dejar libre el 8080, así puedes tener el backend de
+  desarrollo corriendo al mismo tiempo que pruebas el paquete.
+- Las rutas que la UI usa son /login, /setup, /recover, /projects, /workspaces,
+  /docker, /logs, /automation, /monitoring y /settings. Cualquier otra ruta
+  devuelve 404 a proposito: solo se reenvian las que existen en la aplicacion.
+- El puerto se puede cambiar con la variable DEVVAULT_PREVIEW_PORT antes de
+  iniciar el paquete.
+
+CIERRE
+Haz doble clic en Detener-DevVault.bat. PostgreSQL se detiene, pero sus datos quedan guardados para el siguiente inicio.
+
+DATOS Y REGISTROS
+- Base de datos: volumen Docker local devvault-preview_postgres_data.
+- Configuración de acceso: %LOCALAPPDATA%\DevVault\auth.json.
+- Registros del backend: %LOCALAPPDATA%\DevVault\preview\backend.out.log y backend.err.log.
+- DevVault solo enlaza su API a 127.0.0.1.
+
+PROYECTOS JAVA
+- DevVault se ejecuta con el runtime de Java 17 que incluye el paquete, pero no
+  instala JAVA_HOME: los proyectos Java que inicies desde DevVault se compilan
+  con el JDK de tu equipo, el de JAVA_HOME o el primero que encuentre en el PATH.
+- Si un proyecto exige una versión de Java que tu equipo no tiene, el arranque
+  falla. El síntoma es un error de compilación con este texto:
+      error: release version 21 not supported
+  o, en su forma completa dentro de DevVault:
+      El proceso local terminó (código de salida 1) antes de abrir un puerto.
+  Instala el JDK que pida el proyecto y ajusta JAVA_HOME antes de arrancar.
+- La versión de Java que exige un proyecto se define en su pom.xml
+  (java.version) o en su build.gradle (toolchain). No hace falta cambiarla para
+  que DevVault funcione; es un requisito del propio proyecto.
+
+LIMITACIONES DE LA PREVIEW
+- Docker Desktop es necesario, incluso para arrancar PostgreSQL.
+- Resource Management y Environment diffing todavía no están incluidos.
+- Los plugins externos todavía no se pueden instalar.
+- Esta preview es para evaluación local, no para exponer servicios a una red.

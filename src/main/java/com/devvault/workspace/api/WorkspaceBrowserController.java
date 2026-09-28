@@ -21,7 +21,7 @@ import java.util.stream.StreamSupport;
 public class WorkspaceBrowserController {
 
     @GetMapping
-    public DirectoryListingResponse listDirectories(@RequestParam(required = false) String path) {
+    public DirectoryListingResponse listDirectories(@RequestParam(name = "path", required = false) String path) {
         Path current;
         if (path == null || path.isBlank()) {
             try {
