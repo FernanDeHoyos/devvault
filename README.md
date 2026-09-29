@@ -20,10 +20,173 @@ Java 17 · Spring Boot 3.4 · Spring Data JPA · PostgreSQL · Flyway · Docker 
 
 ## Requisitos
 
-- JDK 17.
-- Docker Desktop o Docker Engine para levantar PostgreSQL con Compose y para administrar proyectos Docker.
-- Git disponible en `PATH` para las funciones Git.
-- Node.js/npm o PHP/Composer instalados si se van a iniciar proyectos locales de esos stacks.
+| Herramienta | Versión | Para qué |
+| --- | --- | --- |
+| JDK | 17 | Compilar y ejecutar el backend. Spring Boot 3.4 no arranca en 11 |
+| Docker Desktop / Engine | reciente | PostgreSQL y para administrar contenedores de proyectos |
+| Git | cualquiera en `PATH` | Funciones Git de DevVault |
+| Node.js | `^20.19` o `>=22.12` | Solo para la UI. Lo exige Vite 8 |
+
+Además, según lo que quieras arrancar: Node/npm o PHP/Composer para proyectos
+locales de esos stacks, y un editor de código (VS Code, IntelliJ IDEA, Sublime
+Text o Zed) para la función de abrir proyectos.
+
+## Instalación paso a paso
+
+### 1. Clonar los dos repositorios
+
+El backend y la UI son **repositorios separados**. Clónalos como carpetas hermanas:
+
+```bash
+cd ~/Documents
+git clone https://github.com/FernanDeHoyos/devvault.git
+git clone https://github.com/FernanDeHoyos/devvault-ui.git
+```
+
+Deben quedar contiguos, porque el empaquetado de la preview Windows busca la UI
+en `../devvault-ui` respecto a este repositorio. Si los colocas en otro sitio,
+pásalo explícito (ver [Preview empaquetada](#preview-empaquetada-para-windows)).
+
+### 2. Comprobar el JDK
+
+```bash
+java -version
+```
+
+Debe decir `17`. Si no lo dice, instala [Eclipse Temurin 17](https://adoptium.net/temurin/releases/?version=17)
+y apunta `JAVA_HOME` a la carpeta raíz del JDK, no a su subcarpeta `bin`:
+
+```powershell
+# Windows PowerShell (usuario actual)
+[Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Eclipse Adoptium\jdk-17.0.12_7", "User")
+```
+
+Abre una terminal nueva después de cambiarlo. También es el JDK con el que
+DevVault va a **ejecutar los proyectos que invoques**, así que si tienes
+proyectos que piden Java 21 o superior, ese JDK debe ser el de `JAVA_HOME`.
+
+### 3. Levantar PostgreSQL
+
+```bash
+cd devvault
+docker compose up -d postgres
+```
+
+Publica PostgreSQL 16 en el **puerto 5433** del equipo (5432 dentro del
+contenedor), base de datos `devvault`, usuario `devvault` y contraseña
+`devvault_dev`. Se usa 5433 a propósito, para no chocar con un PostgreSQL
+instalado directamente en tu máquina. Los datos viven en el volumen Docker
+`devvault_pgdata`.
+
+Comprueba que está listo:
+
+```bash
+docker exec devvault-postgres pg_isready -U devvault -d devvault
+```
+
+### 4. Arrancar el backend
+
+```bash
+# Windows PowerShell
+.\gradlew.bat bootRun
+
+# Linux / macOS
+./gradlew bootRun
+```
+
+La primera compilación descarga Gradle 9.5.1 y las dependencias: tarda. La API
+queda en `http://127.0.0.1:8080/api/v1`.
+
+### 5. Arrancar la UI
+
+En otra terminal:
+
+```bash
+cd devvault-ui
+npm ci
+npm run dev
+```
+
+`npm ci` instala exactamente lo que dice `package-lock.json`, que es lo
+recomendable frente a `npm install`. La UI queda en **http://localhost:5050**.
+
+> El 5050 no es arbitrario. Los proyectos que DevVault administra suelen usar
+> 3000, 4200, 5173 u 8080, que son los puertos por defecto de React, Angular, Vite
+> y Spring Boot. DevVault nunca debe competir por el puerto de un proyecto que
+> está intentando arrancar, así que `strictPort` hace que falle visiblemente en
+> vez de saltar al siguiente puerto libre.
+
+### 6. Primer inicio
+
+Abre http://localhost:5050. En el primer arranque no hay administrador, así que
+la UI abre el asistente: crea un usuario, una contraseña de **mínimo 12
+caracteres** y una clave de recuperación. La clave se muestra una sola vez:
+cópiala antes de confirmar. DevVault guarda solo su hash.
+
+### 7. Verificar que todo responde
+
+```bash
+# Linux / macOS / Git Bash
+curl -s http://127.0.0.1:8080/api/v1/health
+```
+
+En Windows PowerShell, `curl` es un alias de `Invoke-WebRequest` y no acepta
+`-s`, así que usa el equivalente nativo:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8080/api/v1/health
+```
+
+Cualquiera de los dos debe devolver algo como
+`{"database":"Operative","status":"UP","timestamp":"..."}`. Si `database` no dice
+`Operative`, el backend arrancó pero no ve a PostgreSQL.
+
+### 8. Probar
+
+```bash
+cd devvault
+./gradlew test        # o .\gradlew.bat test en Windows
+```
+
+## Puertos
+
+| Puerto | Servicio | Nota |
+| --- | --- | --- |
+| 5050 | UI en desarrollo | Servidor de Vite |
+| 8080 | API | Bind a `127.0.0.1` por defecto |
+| 5433 | PostgreSQL de desarrollo | Publicado por `docker-compose.yml` |
+| 5050 | Preview empaquetada | UI y API juntas en el mismo origen |
+| 5434 | PostgreSQL de la preview | Separate, para no chocar con 5433 |
+
+## Problemas frecuentes
+
+**`Port 5050 is already in use`** — Tienes otro proceso en 5050. En PowerShell:
+
+```powershell
+Get-NetTCPConnection -LocalPort 5050 -State Listen | Select-Object OwningProcess
+Stop-Process -Id <PID> -Force
+```
+
+**El backend no encuentra el JDK** — `java -version` responde bien pero Gradle
+falla. Comprueba que `JAVA_HOME` apunte a la raíz del JDK y abre una terminal
+nueva.
+
+**Docker no responde** — DevVault necesita el daemon para PostgreSQL y para
+administrar contenedores. Abre Docker Desktop y espera a que indique que está
+listo.
+
+**`error: release version 21 not supported`** — El proyecto que intentas
+arrancar pide una versión de Java que tu equipo no tiene. Instálala y ajusta
+`JAVA_HOME`. Los proyectos se compilan con el JDK de **tu** máquina, no con el
+runtime incluido de la preview.
+
+**Falla `WorkspaceControllerIT`** — Usa Testcontainers y necesita descargar
+`postgres:16-alpine` de Docker Hub. En una red sin acceso al registro falla aunque
+tengas la imagen descargada. No afecta al resto de la suite.
+
+**El editor no aparece en la lista** — Solo se listan los que se detectan
+instalados. Consulta `GET /api/v1/editors` para ver qué se detectó y con qué
+ruta. Ajusta `DEVVAULT_DEFAULT_EDITOR` o pasa `?editorId=` en la llamada.
 
 ## Ejecución local
 
