@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$UiPath = (Join-Path $PSScriptRoot "..\..\..\devvault-ui"),
     [string]$JdkHome = $env:JAVA_HOME,
     [string]$Version = "0.4.0-preview.1",

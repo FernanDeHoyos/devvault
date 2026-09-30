@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $packageRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $composeFile = Join-Path $packageRoot "compose.preview.yml"
