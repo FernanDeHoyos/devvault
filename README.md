@@ -70,19 +70,57 @@ algo va lento.
 Si prefieres el proceso manual, o si quieres recargar en caliente mientras
 trabajas, sigue leyendo los pasos siguientes.
 
-### 1. Clonar los dos repositorios
+### 1. Clonar
 
-El backend y la UI son **repositorios separados**. Clónalos como carpetas hermanas:
+La UI llega como **submódulo** dentro de este repositorio, así que un solo
+`git clone` trae las dos partes:
 
 ```bash
-cd ~/Documents
-git clone https://github.com/FernanDeHoyos/devvault.git
-git clone https://github.com/FernanDeHoyos/devvault-ui.git
+git clone --recurse-submodules https://github.com/FernanDeHoyos/devvault.git
+cd devvault
 ```
 
-Deben quedar contiguos, porque el empaquetado de la preview Windows busca la UI
-en `../devvault-ui` respecto a este repositorio. Si los colocas en otro sitio,
-pásalo explícito (ver [Preview empaquetada](#preview-empaquetada-para-windows)).
+> Si ya clonaste sin `--recurse-submodules`, la carpeta `ui/` queda vacía. Se
+> arregla sin volver a clonar:
+>
+> ```bash
+> git submodule update --init --recursive
+> ```
+
+> **Por qué un submódulo y no copiar el código.** La UI sigue siendo un
+> repositorio propio, pero el backend fija exactamente qué commit necesita. Así
+> quien clone sabe qué versión de la interfaz va a ver, sin tener que adivinar, y
+> el empaquetado ya no depende de que las carpetas queden juntas.
+
+#### Trabajar en la UI
+
+`ui/` es un repositorio normal dentro del otro. Para tocar el frontend:
+
+```bash
+cd ui
+npm install
+npm run dev          # http://localhost:5050, recarga en caliente, apunta al 8080
+```
+
+Los commits se hacen primero en `ui/` y después se actualiza el puntero en el
+backend:
+
+```bash
+cd ui
+git commit -am "feat: ..."
+git push
+cd ..
+git add ui
+git commit -m "chore: update UI submodule"
+git push
+```
+
+Regenera `dist/` y súbelo junto a los cambios de la UI, porque es lo que
+DevVault sirve en el arranque de un solo comando:
+
+```bash
+cd ui && npm run build && git add dist && git commit -m "build: rebuild dist"
+```
 
 ### 2. Comprobar el JDK
 
@@ -281,13 +319,21 @@ Flyway aplica las migraciones al arrancar; Hibernate valida el esquema existente
 
 La preview se distribuye como un ZIP con UI y backend integrados, un runtime Java 17 reducido y scripts de inicio/cierre. Quien la usa no necesita instalar Java ni configurar variables de entorno. Sí necesita Docker Desktop instalado e iniciado: DevVault lo usa tanto para PostgreSQL como para administrar contenedores de proyectos.
 
-Para generar el paquete desde el repositorio backend, con el repositorio UI hermano y las dependencias de Node instaladas:
+Para generar el paquete desde este repositorio, con la UI disponible en el
+submódulo `ui/` y sus dependencias de Node instaladas:
 
 ```powershell
 .\packaging\windows\Empaquetar-Preview.ps1
 ```
 
-Si los repositorios no están uno junto al otro o el JDK no está en `JAVA_HOME`, se pueden indicar explícitamente:
+Si solo cambiaste el backend, o no quieres depender de Node en la máquina que
+empaqueta, reutiliza la UI ya compilada:
+
+```powershell
+.\packaging\windows\Empaquetar-Preview.ps1 -SkipUiBuild
+```
+
+Si la UI está en otro sitio o el JDK no está en `JAVA_HOME`, indícalo explícito:
 
 ```powershell
 .\packaging\windows\Empaquetar-Preview.ps1 -UiPath "C:\ruta\devvault-ui" -JdkHome "C:\ruta\jdk-17" -Version "0.4.0-preview.1"
@@ -326,7 +372,7 @@ Las pruebas de integración basadas en Testcontainers pueden requerir que Docker
 
 ## Estructura
 
-El código se organiza por módulos funcionales bajo `src/main/java/com/devvault`: `workspace`, `discovery`, `runtime`, `monitoring`, `automation`, `plugin`, `auth`, `editor` y `shared`. Las migraciones SQL están en `src/main/resources/db/migration`.
+El código se organiza por módulos funcionales bajo `src/main/java/com/devvault`: `workspace`, `discovery`, `runtime`, `monitoring`, `automation`, `plugin`, `auth`, `editor` y `shared`. La interfaz vive en el submódulo `ui/`. Las migraciones SQL están en `src/main/resources/db/migration`.
 
 ## Alcance y seguridad
 

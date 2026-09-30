@@ -18,6 +18,10 @@
     ejecutar npm install, ni levantar un segundo servidor de Vite. Tampoco hay
     CORS de por medio porque todo vive en el mismo origen.
 
+    La UI llega como submodulo en la carpeta ui/, y su repositorio versiona la
+    carpeta dist ya compilada, asi que un clon recien bajado trae el frontend
+    listo para servirse.
+
     El estado (PID, logs) queda en %LOCALAPPDATA%\DevVault\dev, separado del de
     la preview empaquetada, que ademas usa otro puerto de PostgreSQL.
 
@@ -44,7 +48,7 @@
 [CmdletBinding()]
 param(
     [int]$Port = 8080,
-    [string]$UiDistPath = (Join-Path $PSScriptRoot "..\..\devvault-ui\dist"),
+    [string]$UiDistPath = (Join-Path $PSScriptRoot "..\ui\dist"),
     [switch]$NoBrowser,
     [switch]$Reuse
 )
@@ -180,8 +184,15 @@ if (Test-Path (Join-Path $UiDistPath "index.html")) {
     Step "UI encontrada en $UiDistPath"
 } else {
     Write-Host "  No se encontro la UI compilada en $UiDistPath." -ForegroundColor Yellow
-    Write-Host "  DevVault arrancara solo con la API. Para tener interfaz, compila la UI con:" -ForegroundColor Yellow
-    Write-Host "    cd ..\devvault-ui; npm install; npm run build" -ForegroundColor Yellow
+    # Un clon sin --recurse-submodules deja la carpeta ui/ vacia, que es el caso
+    # mas probable y el que menos ayuda el error si no se dice explicitamente.
+    if (-not (Test-Path (Join-Path $PSScriptRoot "..\ui"))) {
+        Write-Host "  Parece que el submodulo de la UI no esta inicializado. Ejecuta:" -ForegroundColor Yellow
+        Write-Host "    git submodule update --init --recursive" -ForegroundColor Yellow
+    } else {
+        Write-Host "  DevVault arrancara solo con la API. Para tener interfaz, compila la UI con:" -ForegroundColor Yellow
+        Write-Host "    cd ui; npm install; npm run build" -ForegroundColor Yellow
+    }
 }
 
 # --- 5. Compilar -----------------------------------------------------------

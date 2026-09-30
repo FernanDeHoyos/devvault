@@ -1,5 +1,5 @@
 ﻿param(
-    [string]$UiPath = (Join-Path $PSScriptRoot "..\..\..\devvault-ui"),
+    [string]$UiPath = (Join-Path $PSScriptRoot "..\..\ui"),
     [string]$JdkHome = $env:JAVA_HOME,
     [string]$Version = "0.4.0-preview.1",
     [switch]$SkipUiBuild
@@ -21,10 +21,16 @@ if ($SkipUiBuild) {
         throw "No hay UI compilada en $uiBuildDir. Ejecuta el empaquetado sin -SkipUiBuild para generarla."
     }
 } else {
+    # Si el clon se hizo sin --recurse-submodules, la carpeta ui/ existe pero
+    # esta vacia. Sin este aviso el error siguiente seria "no encuentro Vite",
+    # que no apunta a la causa real.
+    if (-not (Test-Path $UiPath)) {
+        throw "La UI no esta disponible en $UiPath. Inicializa el submodulo con: git submodule update --init --recursive"
+    }
     $uiRoot = (Resolve-Path $UiPath -ErrorAction Stop).Path
     $uiBuilder = Join-Path $uiRoot "node_modules\.bin\vite.cmd"
     if (-not (Test-Path $uiBuilder)) {
-        throw "No encuentro Vite en $uiRoot. Ejecuta npm ci en el repositorio de la UI antes de empaquetar."
+        throw "No encuentro Vite en $uiRoot. Ejecuta 'npm ci' dentro de la carpeta ui antes de empaquetar."
     }
 }
 
