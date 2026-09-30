@@ -7,6 +7,32 @@
 
 $ErrorActionPreference = "Stop"
 
+# Vite, Gradle y jlink escriben parte de su salida normal en stderr. Con
+# ErrorActionPreference = Stop, PowerShell convierte eso en un error fatal que
+# aborta el empaquetado aunque la compilacion haya ido bien. Este envoltorio
+# relaja la preferencia solo durante la llamada y devuelve el codigo de salida,
+# que es lo que indica si el comando fallo de verdad.
+#
+# La salida se captura y se imprime despues, no se deja caer en el pipeline: si
+# se emitiera, el valor devuelto seria un array con todas las lineas del build
+# mas el codigo, y la comparacion con 0 del que llama no serviria de nada.
+function Invoke-NativeCommand {
+    param(
+        [Parameter(Mandatory)] [string] $FilePath,
+        [string[]] $Arguments = @()
+    )
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $FilePath @Arguments 2>&1
+        $code = $LASTEXITCODE
+        $output | Out-String | Write-Host
+        return $code
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 if ($Version -notmatch '^[A-Za-z0-9.-]+$') {
     throw "La versión solo puede contener letras, números, punto y guion."
 }
@@ -68,8 +94,9 @@ if ($SkipUiBuild) {
     Write-Host "1/4 Compilando UI..."
     Push-Location $uiRoot
     try {
-        & $uiBuilder build --outDir $uiBuildDir --emptyOutDir
-        if ($LASTEXITCODE -ne 0) { throw "Falló la compilación de la UI." }
+        if ((Invoke-NativeCommand -FilePath $uiBuilder -Arguments @("build", "--outDir", $uiBuildDir, "--emptyOutDir")) -ne 0) {
+            throw "Falló la compilación de la UI."
+        }
     } finally {
         Pop-Location
     }
@@ -79,22 +106,29 @@ if ($SkipUiBuild) {
 Write-Host "2/4 Generando el backend con la UI integrada..."
 Push-Location $backendRoot
 try {
-    & $gradle bootJar "-PpreviewUiDir=$uiBuildDir"
-    if ($LASTEXITCODE -ne 0) { throw "Falló la generación del JAR." }
+    if ((Invoke-NativeCommand -FilePath $gradle -Arguments @("bootJar", "-PpreviewUiDir=$uiBuildDir", "--console=plain")) -ne 0) {
+        throw "Falló la generación del JAR."
+    }
 } finally {
     Pop-Location
 }
 
+# Se excluye devvault.jar porque Iniciar-dev.ps1 deja ahí una copia con ese
+# nombre. Sin el filtro, si esa copia es más reciente que el JAR recién
+# compilado, el paquete se genera con un build viejo.
 $jarFile = Get-ChildItem (Join-Path $backendRoot "build\libs") -Filter "*.jar" |
-    Where-Object { $_.Name -notlike "*-plain.jar" } |
+    Where-Object { $_.Name -notlike "*-plain.jar" -and $_.Name -ne "devvault.jar" } |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 if (-not $jarFile) { throw "Gradle no generó un JAR ejecutable." }
 
 Write-Host "3/4 Creando el runtime reducido de Java 17..."
 $runtimeDir = Join-Path $stageRoot "runtime"
-& $jlink --add-modules ALL-MODULE-PATH --strip-debug --no-man-pages --no-header-files --compress=2 --output $runtimeDir
-if ($LASTEXITCODE -ne 0) { throw "No se pudo crear el runtime de Java incluido." }
+if ((Invoke-NativeCommand -FilePath $jlink -Arguments @(
+        "--add-modules", "ALL-MODULE-PATH", "--strip-debug", "--no-man-pages",
+        "--no-header-files", "--compress=2", "--output", $runtimeDir)) -ne 0) {
+    throw "No se pudo crear el runtime de Java incluido."
+}
 
 Copy-Item $jarFile.FullName (Join-Path $stageRoot "devvault.jar")
 Copy-Item (Join-Path $PSScriptRoot "compose.preview.yml") $stageRoot

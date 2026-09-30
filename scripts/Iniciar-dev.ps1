@@ -179,15 +179,17 @@ Step "PostgreSQL acepta conexiones en el puerto 5433"
 # el backend funciona igual pero sin interfaz, y avisamos.
 
 $embedUi = $false
+$uiRoot = (Resolve-Path (Join-Path $PSScriptRoot "..") | Join-Path -ChildPath "ui")
 if (Test-Path (Join-Path $UiDistPath "index.html")) {
     $embedUi = $true
     Step "UI encontrada en $UiDistPath"
 } else {
     Write-Host "  No se encontro la UI compilada en $UiDistPath." -ForegroundColor Yellow
-    # Un clon sin --recurse-submodules deja la carpeta ui/ vacia, que es el caso
-    # mas probable y el que menos ayuda el error si no se dice explicitamente.
-    if (-not (Test-Path (Join-Path $PSScriptRoot "..\ui"))) {
-        Write-Host "  Parece que el submodulo de la UI no esta inicializado. Ejecuta:" -ForegroundColor Yellow
+    # Un clon sin --recurse-submodules deja la carpeta ui/ creada pero vacia, asi
+    # que probar si existe no sirve: hay que mirar si el submodulo esta
+    # inicializado de verdad, y eso se reconoce por su archivo .git.
+    if (-not (Test-Path (Join-Path $uiRoot ".git"))) {
+        Write-Host "  El submodulo de la UI no esta inicializado. Ejecuta:" -ForegroundColor Yellow
         Write-Host "    git submodule update --init --recursive" -ForegroundColor Yellow
     } else {
         Write-Host "  DevVault arrancara solo con la API. Para tener interfaz, compila la UI con:" -ForegroundColor Yellow
@@ -200,12 +202,19 @@ if (Test-Path (Join-Path $UiDistPath "index.html")) {
 $gradle = Join-Path $backendRoot "gradlew.bat"
 if (-not (Test-Path $gradle)) { $gradle = Join-Path $backendRoot "gradlew" }
 
+# Que el JAR este al dia depende de dos cosas: los fuentes del backend y, si se
+# embebe, la UI compilada. Comparar solo contra src/main hacia que un JAR
+# construido sin UI se reutilizara despues de inicializar el submodulo, y la
+# aplicacion arrancaria sin interfaz sin avisar.
 $needsBuild = $true
 if ($Reuse -and (Test-Path $jarFile)) {
-    $newestSource = Get-ChildItem (Join-Path $backendRoot "src\main") -Recurse -File |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
-    if ($newestSource -and $newestSource.LastWriteTime -lt (Get-Item $jarFile).LastWriteTime) {
+    $jarTime = (Get-Item $jarFile).LastWriteTime
+    $inputs = @(Get-ChildItem (Join-Path $backendRoot "src\main") -Recurse -File -ErrorAction SilentlyContinue)
+    if ($embedUi) {
+        $inputs += @(Get-ChildItem $UiDistPath -Recurse -File -ErrorAction SilentlyContinue)
+    }
+    $newestInput = $inputs | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($newestInput -and $newestInput.LastWriteTime -lt $jarTime) {
         $needsBuild = $false
     }
 }
@@ -285,16 +294,18 @@ Step "Backend sano en http://127.0.0.1:$Port"
 
 Write-Host ""
 Write-Host "  DevVault listo" -ForegroundColor Green
-Write-Host "  Interfaz     http://localhost:$Port/login"
+if ($embedUi) {
+    Write-Host "  Interfaz     http://localhost:$Port/login"
+} else {
+    Write-Host "  Interfaz     no disponible (falta la UI compilada)"
+}
 Write-Host "  API          http://127.0.0.1:$Port/api/v1"
 Write-Host "  Registros    $stdoutLog"
 Write-Host "  Detener      .\scripts\Detener-dev.ps1"
-if (-not $embedUi) {
-    Write-Host ""
-    Write-Host "  Sin interfaz web: la API responde, pero no hay UI que abrir." -ForegroundColor Yellow
-}
 Write-Host ""
 
-if (-not $NoBrowser) {
+# Abrir el navegador solo tiene sentido si hay interfaz que abrir: sin UI esa
+# ruta devuelve 404 y el usuario ve un error en vez de un mensaje util.
+if ($embedUi -and -not $NoBrowser) {
     Start-Process "http://localhost:$Port/login"
 }
