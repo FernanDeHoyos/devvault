@@ -33,6 +33,43 @@ Text o Zed) para la función de abrir proyectos.
 
 ## Instalación paso a paso
 
+### Atajo: un solo comando
+
+Si ya clonaste los dos repositorios, esto es todo lo que necesitas:
+
+```powershell
+.\scripts\Iniciar-dev.ps1
+```
+
+Comprueba el JDK y Docker, levanta PostgreSQL, compila el backend
+**incluyendo la UI ya compilada** del repositorio hermano, espera a que la API
+responda y abre el navegador en `http://localhost:8080/login`. Para cerrar:
+
+```powershell
+.\scripts\Detener-dev.ps1
+```
+
+El script mide el tiempo de cada paso, así que sabes dónde se va el tiempo si
+algo va lento.
+
+| Opción | Para qué |
+| --- | --- |
+| `-Reuse` | Reutiliza el JAR si no cambiaste código Java. Ahorra ~15s |
+| `-Port 8090` | Arranca en otro puerto si el 8080 está ocupado |
+| `-NoBrowser` | No abre el navegador |
+| `-UiDistPath` | Indica otra carpeta con la UI compilada |
+| `Detener-dev.ps1 -StopDatabase` | Detiene también PostgreSQL |
+
+> **Por qué no hace falta Node.** El repositorio `devvault-ui` versiona su
+> carpeta `dist/`, así que un clon recién bajado ya incluye el frontend
+> compilado y el script lo sirve desde el propio backend. Sin Node, sin
+> `npm install`, sin segundo servidor de Vite y sin CORS, porque todo queda en el
+> mismo origen. Para trabajar en la UI con recarga en caliente, usa
+> `npm run dev` en `devvault-ui` y el 8080 como destino de la API.
+
+Si prefieres el proceso manual, o si quieres recargar en caliente mientras
+trabajas, sigue leyendo los pasos siguientes.
+
 ### 1. Clonar los dos repositorios
 
 El backend y la UI son **repositorios separados**. Clónalos como carpetas hermanas:
