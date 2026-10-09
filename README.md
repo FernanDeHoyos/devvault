@@ -5,6 +5,7 @@ Backend de **DevVault**, una aplicación local para descubrir proyectos de desar
 ## Funcionalidades
 
 - Registro de workspaces y exploración de proyectos en sus directorios.
+- Quitar un workspace de DevVault: detiene lo que tenga en marcha y borra en cascada sus proyectos y datos, **sin tocar los archivos de la carpeta**.
 - Detección de proyectos Spring Boot (Maven/Gradle), Node.js/React y PHP/Laravel.
 - Catálogo estático de rutas para Spring MVC, Laravel, Express, Fastify y NestJS.
 - Inicio y detención de proyectos locales o definidos con Docker Compose.
@@ -361,18 +362,20 @@ Base path: `/api/v1`.
 
 | Área | Rutas principales |
 | --- | --- |
-| Workspaces | `/workspaces`, `/workspaces/{id}/scan` |
+| Workspaces | `/workspaces`, `/workspaces/{id}/scan`, `DELETE /workspaces/{id}` |
 | Proyectos | `/projects`, `/projects/{id}`, `/projects/{id}/routes` |
-| Runtime | `/projects/{id}/start`, `/stop`, `/status`, `/services` |
+| Runtime | `/projects/{id}/start`, `/stop`, `/status`, `/services`, `/runtime/active` |
 | Logs | WebSocket `/projects/{id}/logs?service={serviceName}` |
 | Git | `/projects/{id}/git`, `/projects/{id}/git/fetch` |
 | Monitoring | `/projects/{id}/metrics`, `/alerts` |
 | Automation | `/automation/rules` |
 | Plugins integrados | `/plugins` |
 | Editor | `/editors`, `/projects/{id}/open` |
+| Salud | `/health` |
 
-Resource Management y Environment diffing están diseñados en el contrato de API
-pero todavía no implementados.
+Resource Management, Environment diffing y `POST /projects/{id}/restart` están
+diseñados en el contrato de API pero todavía no implementados. El recuento
+completo está en [DevVault-API-Design.md](docs/DevVault-API-Design.md).
 
 ## Pruebas
 
