@@ -4,7 +4,7 @@
 
 - **Base path:** `/api/v1`
 - **Formato:** JSON en request y response, `Content-Type: application/json`
-- **Auth:** no hay. DevVault se ejecuta íntegro en la máquina del usuario y enlaza a `127.0.0.1` por defecto, así que la superficie expuesta es el propio equipo. Lo que sí se aplica es `SameOriginFilter`: cualquier petición con cabecera `Origin` que no sea un origen propio devuelve `403`. Eso impide que una página web cualquieravisited desde el navegador pueda lanzar peticiones locales (ver *Alcance y seguridad*).
+- **Auth:** no hay. DevVault se ejecuta íntegro en la máquina del usuario y enlaza a `127.0.0.1` por defecto, así que la superficie expuesta es el propio equipo. Lo que sí se aplica es `SameOriginFilter`: cualquier petición con cabecera `Origin` que no sea un origen propio devuelve `403`. Eso impide que una página web cualquiera visitada desde el navegador pueda lanzar peticiones locales (ver *Alcance y seguridad*).
 - **Configuración inicial:** ninguna. No hay administrador, ni contraseña, ni clave de recuperación.
 - **IDs:** UUID en formato string
 - **Fechas:** ISO-8601 con timezone (`2026-08-13T14:30:00Z`)
@@ -29,6 +29,26 @@
 }
 ```
 - **Operaciones asíncronas** (escaneo, start/stop): responden `202 Accepted` inmediatamente y exponen un endpoint de estado para hacer polling, en vez de bloquear la petición.
+
+---
+
+## 0. Salud del servicio
+
+### `GET /health`
+Comprueba que DevVault responde **y que su base de datos está accesible**. No
+pertenece a ningún módulo de negocio: lo usan los scripts de arranque
+(`scripts/Iniciar-dev.ps1`, el empaquetado de preview) para decidir cuándo la
+aplicación está lista, y una página que abra `bootRun` a ciegas y falle con
+`Connection refused` sin decir por qué.
+
+**Response `200`:** `{ "status": "UP", "database": "Operative", "timestamp": "..." }`
+**Response `200`:** con la base caída, `status` y `database` valen `DOWN` y
+`Unreachable` respectivamente.
+
+> Devuelve `200` en ambos casos a propósito: el endpoint responde, y quien
+> pregunta tiene que leer `status` para saber si el servicio está sano. Un `503`
+> sería defendible, pero los scripts de arranque interpretarían un `503` como
+> "aún levantándose" y esperarían a un `200` que ya había llegado.
 
 ---
 
@@ -80,11 +100,28 @@ Consulta el estado del último escaneo (polling).
 ```json
 { "scanId": "uuid", "status": "IN_PROGRESS", "projectsFound": 4, "startedAt": "...", "finishedAt": null }
 ```
-`status` ∈ `IN_PROGRESS | COMPLETED | FAILED`
+`status` ∈ `NOT_STARTED | IN_PROGRESS | COMPLETED | FAILED`
+
+> Un Workspace que nunca se ha escaneado devuelve `NOT_STARTED` con 200, no 404.
+> El estado vive en memoria, así que solo existe si alguien lanzó un escaneo;
+> devolver 404 llenaba la consola de la UI en el caso normal de "todavía no he
+> escaneado esto", sin que hubiera nada que arreglar.
 
 ### `DELETE /workspaces/{id}`
-Elimina el Workspace (cascada sobre sus Project, por diseño del ERD).
-**Response:** `204` · **Errores:** `404`
+Quita un Workspace de DevVault. Se detienen antes sus runtimes y se borran en
+cascada sus proyectos y todos los datos que cuelgan de ellos (profiles,
+services, containers, runtime_instances, alerts, automation_rules,
+git_fetch_events). **Los archivos de la carpeta no se tocan:** borrar un
+Workspace es olvidarse de una carpeta, no borrarla del disco.
+
+**Response:** `204` · **Errores:** `404` si el Workspace no existe
+
+> La cascada la pone el esquema (`projects.workspace_id` es `ON DELETE CASCADE`),
+> así que esto no necesita ninguna migración. Detener los runtimes antes sí es
+> necesario: la cascada borra filas, pero no sabe nada de los contenedores de
+> Docker ni de los procesos locales, que quedarían sin control. Si un runtime se
+> resiste a pararse, el borrado aborta y el Workspace queda intacto: es
+> preferible a perder el control de un proceso huérfano.
 
 ---
 
@@ -156,8 +193,13 @@ Detiene el entorno (CU-06).
 **Errores:** `409` el proyecto no tiene una instancia activa
 
 ### `POST /projects/{id}/restart`
-Azúcar sintáctico sobre stop + start.
-**Response `202`:** igual que start
+Azúcar sintáctico sobre stop + start. **No implementado** *(v1.0)*.
+
+> No existe en el código: cuando el usuario reinicia, la UI encadena
+> `POST /stop` seguido de `POST /start`. Está en el contrato porque es una
+> operación que la interfaz necesita, pero no merece un endpoint propio: dos
+> peticiones ya dan el resultado y cada una tiene su respuesta real, en lugar de
+> un 202 que obligaría a consultar el estado después.
 
 ### `GET /projects/{id}/status`
 Estado agregado del `RuntimeInstance` actual.
@@ -184,6 +226,22 @@ Lista los `Service` + `Container` del proyecto. Desde la extensión de ejecució
   "kind": "LOCAL_PROCESS", "pid": 22976, "command": "npm.cmd run dev", "dockerContainerId": null }
 ```
 `port` refleja el puerto **real** detectado en la salida del proceso (no necesariamente el asumido por convención — ver nota de diseño en 5.1 sobre por qué el puerto asumido no es confiable).
+
+### `GET /runtime/active`
+Vista agregada de todo lo que está corriendo ahora, sin importar a qué proyecto
+pertenezca.
+
+**Response `200`:** array de:
+```json
+{ "projectId": "uuid", "overallStatus": "RUNNING", "startedAt": "...", "services": [
+  { "name": "app-backend", "status": "RUNNING", "kind": "LOCAL_PROCESS", "pid": 22976 }
+]}
+```
+
+> Existe para el Dashboard: sin ella, la UI tendría que pedir
+> `GET /projects/{id}/status` por cada proyecto (N+1) solo para pintar una lista
+> de los que están activos. No estaba en el contrato original, aunque el código
+> lo implementaba desde antes que esta tabla.
 
 ### `WS /projects/{id}/logs?service={serviceName}&ticket={ticket}`
 Canal WebSocket de streaming de logs en vivo (CU-07). El handshake lo valida `SameOriginFilter` cuando el navegador manda cabecera `Origin`.
@@ -388,9 +446,10 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 | DELETE | `/projects/{id}` | Discovery | — |
 | POST | `/projects/{id}/start` | Runtime | CU-05 |
 | POST | `/projects/{id}/stop` | Runtime | CU-06 |
-| POST | `/projects/{id}/restart` | Runtime | CU-05/06 |
+| POST | `/projects/{id}/restart` | Runtime *(v1.0)* | CU-05/06 |
 | GET | `/projects/{id}/status` | Runtime | CU-05 |
 | GET | `/projects/{id}/services` | Runtime | CU-07 |
+| GET | `/runtime/active` | Runtime | CU-04 |
 | WS | `/projects/{id}/logs` | Runtime | CU-07 |
 | POST | `/resources` | Resource *(v1.0)* | CU-08 |
 | GET | `/resources` | Resource *(v1.0)* | — |
@@ -412,8 +471,15 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 | PATCH | `/plugins/{id}` | Plugin | — |
 | GET | `/editors` | Editor | — |
 | POST | `/projects/{id}/open` | Editor | — |
+| GET | `/health` | Salud | — |
 
-**Total: 39 endpoints** en el contrato. **31 están implementados** (30 REST + 1 WebSocket) y 8 están diseñados pero pendientes de v1.0: Resource (6) y Environment (2), marcados con *(v1.0)*.
+**Total: 41 endpoints** en el contrato. **32 están implementados** (31 REST + 1 WebSocket) y 9 están diseñados pero pendientes de v1.0: Resource (6), Environment (2) y `POST /projects/{id}/restart`, marcados con *(v1.0)*.
+
+> Las cifras están comprobadas contra el código, no estimadas: 38 secciones de
+> endpoint + WebSocket + `GET /health` + `GET /runtime/active`. Los dos últimos
+> los implementaba el código desde antes de que esta tabla los recogiera, y
+> `restart` figuraba aquí sin existir en ningún sitio: la UI reinicia encadenando
+> `POST /stop` y `POST /start`.
 
 No hay autenticación: el acceso se protege enlazando a `127.0.0.1` y rechazando peticiones con un `Origin` ajeno.
 

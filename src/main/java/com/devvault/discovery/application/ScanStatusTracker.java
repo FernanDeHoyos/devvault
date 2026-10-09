@@ -91,4 +91,44 @@ public class ScanStatusTracker {
         public Optional<Snapshot> getStatus(UUID workspaceId) {
             return Optional.ofNullable(statuses.get(workspaceId));
         }
+
+        /**
+         * Estado del escaneo, o NOT_STARTED si el Workspace nunca se escaneó.
+         *
+         * <p>Antes este caso devolvía 404 desde el controlador, que era la
+         * semántica equivocada: que un Workspace no se haya escaneado nunca no
+         * significa que no exista. La UI hace polling de este estado en cada
+         * tarjeta, así que un Workspace recién creado provocaba un 404 en
+         * consola sin que hubiera nada que arreglar. El valor NOT_STARTED ya
+         * existía en el enum pero no se devolvía nunca.
+         *
+         * <p>Devolver NOT_STARTED <strong>no</strong> guarda nada en el mapa. Un
+         * computeIfAbsent aquí sería más corto, pero dejaría constancia de un
+         * escaneo que no ocurrió: la UI consulta esto para todas las tarjetas de
+         * la pantalla, así que el mapa crecería con workspaces que jamás se
+         * escanearon, y getStatus dejaría de poder distinguir "nunca escaneado"
+         * de "escaneado y falló".
+         *
+         * @param workspaceId el Workspace consultado
+         * @return su estado, o NOT_STARTED si no hay registro
+         */
+        public Snapshot statusOrNotStarted(UUID workspaceId) {
+            Snapshot snapshot = statuses.get(workspaceId);
+            return snapshot != null
+                    ? snapshot
+                    : new Snapshot(ScanStatus.NOT_STARTED, 0, null, null, null);
+        }
+
+        /**
+         * Olvida el estado de un Workspace.
+         *
+         * <p>El mapa es en memoria y no expira entradas por sí solo. Al borrar un
+         * Workspace, sin esto quedaría un snapshot de algo que ya no existe, y
+         * además una fuga que crece con cada workspace borrado.
+         *
+         * @param workspaceId el Workspace a olvidar
+         */
+        public void forget(UUID workspaceId) {
+            statuses.remove(workspaceId);
+        }
 }

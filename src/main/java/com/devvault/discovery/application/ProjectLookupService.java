@@ -1,8 +1,10 @@
 package com.devvault.discovery.application;
 
+import com.devvault.discovery.domain.Project;
 import com.devvault.discovery.infraestructure.*;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,5 +33,22 @@ public class ProjectLookupService {
     public Optional<ProjectSummary> findById(UUID projectId) {
         return projectRepository.findById(projectId)
                 .map(p -> new ProjectSummary(p.getId(), p.getName(), p.getPath()));
+    }
+
+    /**
+     * IDs de los proyectos que pertenecen a un Workspace.
+     *
+     * <p>Lo necesita el borrado de Workspace para poder detener sus runtimes
+     * antes de borrar las filas: la cascada del esquema borra la base de datos,
+     * pero no sabe nada de los contenedores de Docker ni de los procesos locales
+     * que quedarían sin control.
+     *
+     * @param workspaceId Workspace cuyos proyectos se quieren localizar
+     * @return los ids, vacía si el Workspace no tiene proyectos registrados
+     */
+    public List<UUID> findIdsByWorkspaceId(UUID workspaceId) {
+        return projectRepository.findByWorkspaceId(workspaceId).stream()
+                .map(Project::getId)
+                .toList();
     }
 }
