@@ -12,7 +12,7 @@ Backend de **DevVault**, una aplicación local para descubrir proyectos de desar
 - Métricas y alertas de runtime, reglas de automatización y administración de plugins integrados.
 - Apertura de un proyecto en el editor instalado (VS Code, IntelliJ, Sublime, Zed), configurable con `DEVVAULT_DEFAULT_EDITOR`.
 - Resumen Git con ramas, commits, estado de cambios, relación con upstream y `fetch` manual.
-- Autenticación local para un administrador, JWT con expiración/revocación y tickets de un solo uso para WebSocket.
+- Sin autenticación: la API va abierta en la máquina del usuario y se protege enlazando a `127.0.0.1` y rechazando peticiones con un `Origin` ajeno.
 
 ## Stack
 
@@ -43,7 +43,7 @@ Si ya clonaste los dos repositorios, esto es todo lo que necesitas:
 
 Comprueba el JDK y Docker, levanta PostgreSQL, compila el backend
 **incluyendo la UI ya compilada** del repositorio hermano, espera a que la API
-responda y abre el navegador en `http://localhost:8080/login`. Para cerrar:
+responda y abre el navegador en `http://localhost:8080`. Para cerrar:
 
 ```powershell
 .\scripts\Detener-dev.ps1
@@ -191,12 +191,9 @@ recomendable frente a `npm install`. La UI queda en **http://localhost:5050**.
 > está intentando arrancar, así que `strictPort` hace que falle visiblemente en
 > vez de saltar al siguiente puerto libre.
 
-### 6. Primer inicio
+### 6. Abrir la interfaz
 
-Abre http://localhost:5050. En el primer arranque no hay administrador, así que
-la UI abre el asistente: crea un usuario, una contraseña de **mínimo 12
-caracteres** y una clave de recuperación. La clave se muestra una sola vez:
-cópiala antes de confirmar. DevVault guarda solo su hash.
+No hay asistente ni contraseña: DevVault abre directamente en el panel.
 
 ### 7. Verificar que todo responde
 
@@ -289,29 +286,46 @@ GET http://127.0.0.1:8080/api/v1/health
 
 Compose publica PostgreSQL 16 en el puerto `5433` del equipo (puerto `5432` dentro del contenedor), base de datos `devvault` y credenciales locales de desarrollo definidas en `docker-compose.yml`. Se usa `5433` para evitar conflictos con PostgreSQL instalado directamente en el equipo. La configuración de conexión de Spring está en `src/main/resources/application.yml`. Cambia esas credenciales antes de usar una base de datos accesible desde otras máquinas.
 
-### Primer inicio y autenticación
+### Seguridad
 
-No necesitas definir variables de autenticación para usar DevVault. En el primer inicio, abre la UI y crea un usuario y una contraseña de al menos 12 caracteres en el asistente de configuración. También genera una clave aleatoria de recuperación; guárdala fuera del equipo y confírmala antes de terminar. La clave se muestra una sola vez y DevVault conserva únicamente su hash. Si olvidas la contraseña, podrás cambiarla con esa clave desde la pantalla de recuperación. No hay registro público, tabla de usuarios ni roles.
+DevVault no tiene autenticación. Es una decisión deliberada y conviene entender
+qué cubre y qué no.
 
-Los perfiles de DevVault creados antes de añadir la recuperación no tienen todavía una clave configurada; usa el restablecimiento local descrito abajo para volver al asistente y crear una nueva.
+**Qué cubre.** El backend enlaza a `127.0.0.1` por defecto, así que la API solo
+es alcanzable desde el propio equipo, no desde la red. Además `SameOriginFilter`
+devuelve `403` ante cualquier petición que llegue con una cabecera `Origin` que
+no sea un origen propio.
 
-DevVault guarda el hash BCrypt de la contraseña y una clave de firma JWT aleatoria en un archivo local fuera del repositorio: `%LOCALAPPDATA%\DevVault\auth.json` en Windows, `~/Library/Application Support/DevVault/auth.json` en macOS y `$XDG_CONFIG_HOME/devvault/auth.json` (o `~/.config/devvault/auth.json`) en Linux. El backend queda enlazado a `127.0.0.1` por defecto.
+**Por qué hace falta el filtro si ya está en loopback.** La amenaza realista no
+es un atacante remoto: es cualquier página web que estés mirando. CORS impide
+que esa página *lea* la respuesta de la API, pero no impide que la *petición* se
+ejecute. Una petición "simple" —la que no lleva cabeceras raras ni cuerpo
+tipado— se envía igualmente. Sin el filtro, visitar una página cualquiera podría
+acabar en `POST /api/v1/projects/{id}/stop` (que no lleva cuerpo, luego es
+simple) y parar tus proyectos, o en `POST /api/v1/projects/{id}/open` y lanzar
+tu editor.
 
-Si se pierde también la clave de recuperación, cierra el backend y elimina solo `%LOCALAPPDATA%\DevVault\auth.json` (Windows) para volver al asistente inicial. En macOS/Linux, elimina el `auth.json` de la ruta indicada arriba. Al iniciar de nuevo, DevVault generará otra clave de firma JWT y pedirá crear el administrador otra vez. Esto conserva los datos de proyectos en PostgreSQL, pero invalida las sesiones existentes. No uses este método si configuraste credenciales mediante variables de entorno.
+**Qué no cubre.** Cualquier programa que se ejecute en tu cuenta puede hablar
+con la API sin restricción, porque el filtro solo mira la cabecera `Origin` y las
+peticiones sin `Origin` se dejan pasar (las de `curl`, Postman o cualquier
+cliente de línea de comandos). Y si cambias `server.address` para escuchar en
+`0.0.0.0`, la API queda accesible a la red sin ninguna autenticación.
 
-Estas variables son opcionales para desarrollo avanzado o ejecución automatizada:
+**No expongas el backend a redes no confiables.** Es una herramienta local, no un
+servicio. Si necesitas accessing from another machine, usa un túnel o un proxy
+con autenticación propia, no abras el puerto.
+
+### Variables de entorno
+
+Todas son opcionales para desarrollo avanzado o ejecución automatizada:
 
 | Variable | Uso |
 | --- | --- |
-| `DEVVAULT_AUTH_USERNAME` y `DEVVAULT_AUTH_PASSWORD` | Credenciales para ejecución automatizada; deben configurarse juntas y deshabilitan el asistente inicial |
-| `DEVVAULT_JWT_SECRET_BASE64` | Reemplaza la clave guardada; Base64 con al menos 32 bytes aleatorios |
-| `DEVVAULT_AUTH_CONFIG_PATH` | Cambia la ubicación del archivo local de autenticación |
-| `DEVVAULT_JWT_DURATION_MINUTES` | Vigencia del token (20 minutos por defecto, mínimo 5) |
 | `DEVVAULT_DEFAULT_EDITOR` | Editor con el que se abren los proyectos: `vscode`, `vscode-insiders`, `intellij`, `sublime`, `zed` o `notepad` (por defecto `vscode`). Si no está instalado, DevVault usa el primero que detecte |
 | `DEVVAULT_STARTUP_TIMEOUT_SECONDS` | Suelo del tiempo de espera del arranque de un proceso local (300 por defecto) |
 | `DEVVAULT_PREVIEW_PORT` | Puerto de la preview empaquetada (5050 por defecto) |
 
-El frontend guarda el JWT solo en `sessionStorage`; cerrar sesión lo revoca en el backend. El WebSocket de logs usa un ticket ligado al proyecto/servicio, de un solo uso y válido 30 segundos. El endpoint `/api/v1/health` queda público para comprobar disponibilidad.
+El frontend llama a la API por ruta relativa en la preview y a `127.0.0.1:8080` en desarrollo. El WebSocket de logs se abre sobre el mismo origen. El endpoint `/api/v1/health` queda disponible para comprobar disponibilidad.
 
 Flyway aplica las migraciones al arrancar; Hibernate valida el esquema existente y no lo genera.
 
@@ -350,13 +364,15 @@ Base path: `/api/v1`.
 | Workspaces | `/workspaces`, `/workspaces/{id}/scan` |
 | Proyectos | `/projects`, `/projects/{id}`, `/projects/{id}/routes` |
 | Runtime | `/projects/{id}/start`, `/stop`, `/status`, `/services` |
-| Auth | `/auth/setup-status`, `/auth/setup`, `/auth/recover`, `/auth/login`, `/auth/me`, `/auth/logout`, `/auth/ws-ticket` |
-| Logs | WebSocket `/projects/{id}/logs?service={serviceName}&ticket={ticket}` |
+| Logs | WebSocket `/projects/{id}/logs?service={serviceName}` |
 | Git | `/projects/{id}/git`, `/projects/{id}/git/fetch` |
 | Monitoring | `/projects/{id}/metrics`, `/alerts` |
 | Automation | `/automation/rules` |
 | Plugins integrados | `/plugins` |
 | Editor | `/editors`, `/projects/{id}/open` |
+
+Resource Management y Environment diffing están diseñados en el contrato de API
+pero todavía no implementados.
 
 ## Pruebas
 
@@ -372,8 +388,8 @@ Las pruebas de integración basadas en Testcontainers pueden requerir que Docker
 
 ## Estructura
 
-El código se organiza por módulos funcionales bajo `src/main/java/com/devvault`: `workspace`, `discovery`, `runtime`, `monitoring`, `automation`, `plugin`, `auth`, `editor` y `shared`. La interfaz vive en el submódulo `ui/`. Las migraciones SQL están en `src/main/resources/db/migration`.
+El código se organiza por módulos funcionales bajo `src/main/java/com/devvault`: `workspace`, `discovery`, `runtime`, `monitoring`, `automation`, `plugin`, `editor` y `shared`. La interfaz vive en el submódulo `ui/`. Las migraciones SQL están en `src/main/resources/db/migration`.
 
 ## Alcance y seguridad
 
-DevVault está pensado para ejecutarse localmente. La API requiere autenticación salvo login, health y el handshake validado por ticket. CORS permite el frontend local en `http://localhost:5050` y `http://127.0.0.1:5050`. No expongas el backend o la base de datos a redes no confiables con la configuración de desarrollo.
+DevVault está pensado para ejecutarse localmente y no lleva autenticación. La API enlaza a `127.0.0.1` por defecto y `SameOriginFilter` rechaza las peticiones con un `Origin` ajeno. Lee [Seguridad](#seguridad) para qué cubre y qué no. No expongas el backend a redes no confiables.

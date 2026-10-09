@@ -295,7 +295,7 @@ Step "Backend sano en http://127.0.0.1:$Port"
 Write-Host ""
 Write-Host "  DevVault listo" -ForegroundColor Green
 if ($embedUi) {
-    Write-Host "  Interfaz     http://localhost:$Port/login"
+    Write-Host "  Interfaz     http://localhost:$Port"
 } else {
     Write-Host "  Interfaz     no disponible (falta la UI compilada)"
 }
@@ -307,5 +307,5 @@ Write-Host ""
 # Abrir el navegador solo tiene sentido si hay interfaz que abrir: sin UI esa
 # ruta devuelve 404 y el usuario ve un error en vez de un mensaje util.
 if ($embedUi -and -not $NoBrowser) {
-    Start-Process "http://localhost:$Port/login"
+    Start-Process "http://localhost:$Port"
 }

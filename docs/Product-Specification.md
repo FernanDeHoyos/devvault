@@ -1,26 +1,15 @@
 
 ## Product Specification
 
-> **Estado actual de autenticación:** el primer inicio permite crear un administrador local desde la UI y generar una clave de recuperación que el backend conserva como hash. La clave permite restablecer la contraseña y revoca sesiones anteriores. La clave JWT y los datos de autenticación se guardan fuera del repositorio. No hay registro público, entidad `User` ni roles; las propuestas de multiusuario son futuras.
+> **Estado actual de autenticación:** DevVault no tiene autenticación. Se
+> ejecuta íntegro en la máquina del usuario y enlaza a `127.0.0.1`. El acceso se
+> protege con `SameOriginFilter`, que devuelve `403` ante cualquier petición con
+> una cabecera `Origin` de otro sitio, para que una página web cualquiera no
+> pueda lanzar acciones contra la API local. No hay entidad `User`, ni roles, ni
+> tabla de sesiones.
 
 
 ## 1. Casos de uso
-
-### CU-01 — Iniciar sesión
-- **Actor:** Usuario
-- **Precondición:** si es el primer inicio, no existe administrador local configurado
-- **Flujo principal:**
-  1. En el primer inicio, el usuario crea un administrador desde la UI
-  2. El sistema guarda el hash de contraseña y genera de forma segura la clave JWT local
-  3. En los siguientes inicios, valida usuario/contraseña y emite un JWT HS256 de corta duración
-- **Flujo alterno:** credenciales inválidas → `401 Unauthorized` genérico
-- **Postcondición:** el usuario queda autenticado para las siguientes peticiones
-
-### CU-02 — Cerrar sesión
-- **Actor:** Usuario
-- **Precondición:** sesión activa (JWT válido)
-- **Flujo principal:** el cliente solicita el cierre y el sistema revoca el JWT hasta su expiración
-- **Postcondición:** el token deja de ser aceptado por el sistema
 
 ### CU-03 — Crear y escanear un Workspace
 - **Actor:** Usuario
@@ -131,16 +120,6 @@
 
 Formato: `Como [rol], quiero [acción], para [beneficio]`, con criterios de aceptación en Gherkin y trazabilidad a los RF/CU definidos antes. Estimación en talla de camiseta (S/M/L) solo como referencia de esfuerzo relativo.
 
-### HU-01 — Configuración y acceso local de administrador
-**Como** desarrollador, **quiero** configurar una contraseña desde la UI en el primer inicio, **para** proteger DevVault sin editar archivos ni variables del sistema.
-- **Criterios de aceptación:**
-  - El primer inicio permite crear exactamente un administrador; los inicios posteriores presentan login
-  - Las rutas protegidas requieren un JWT válido y credenciales inválidas producen `401` genérico
-  - El token vence según la duración configurada y el cierre de sesión lo revoca
-  - El cliente conserva el token solo en la sesión del navegador
-- **Prioridad:** Alta · **Estimación:** S
-- **Trazabilidad:** RF-01/RF-02 (diferidos), decisión de diseño de la conversación anterior
-
 ### HU-02 — Crear un Workspace
 **Como** desarrollador, **quiero** registrar una carpeta local como Workspace, **para** que DevVault sepa dónde buscar mis proyectos.
 - **Criterios de aceptación:**
@@ -221,7 +200,6 @@ Formato: `Como [rol], quiero [acción], para [beneficio]`, con criterios de acep
 
 | HU | Prioridad | Estimación |
 |---|---|---|
-| HU-01 Configuración de administrador | Alta | S |
 | HU-02 Crear Workspace | Alta | S |
 | HU-03 Listar Workspaces | Media | S |
 | HU-04 Escanear Workspace | Alta | M |
@@ -239,9 +217,6 @@ Si necesitas recortar alcance para entregar más rápido, **HU-10 es la primera 
 ### 3. Reglas de negocio
 
 Aquí tienes solo las reglas de negocio, consolidadas de todo lo que hemos definido hasta ahora (agrupadas por contexto, sin el resto del documento):
-
-### Identity
-- El sistema nunca revela si un email existe o no ante un intento de login fallido (evita *user enumeration*), solo responde `401` genérico.
 
 ### Workspace Management
 - Una ruta local no puede registrarse dos veces como Workspace (evita duplicados apuntando a la misma carpeta).
@@ -354,7 +329,7 @@ Esto es lo que hace que, si mañana quieres extraer `runtime` a un microservicio
 
 - **Workspace:** lista de Workspaces registrados (nombre, ruta, cantidad de proyectos, fecha del último escaneo) + botón "Escanear ahora" por fila, y un modal simple para crear uno nuevo (input de ruta local)
 - **Monitoring:** grid de tarjetas por servicio/runtime con CPU/RAM actual (Docker o proceso local, agregado por árbol PID), y debajo un feed de alertas activas/resueltas — reutiliza el mismo componente de "actividad reciente" del Dashboard
-- **Settings:** formulario simple: ruta por defecto de escaneo, activar/desactivar autenticación (HU-01), gestión de `Resource` registrados, y la lista de `PluginDescriptor` habilitados/deshabilitados
+- **Settings:** formulario simple: ruta por defecto de escaneo, gestión de `Resource` registrados, y la lista de `PluginDescriptor` habilitados/deshabilitados
 
 
 ---
@@ -525,16 +500,11 @@ erDiagram
 
 Tablas derivadas del ERD, con tipos concretos para PostgreSQL (convención `snake_case`, PK como `UUID`).
 
-```sql
--- IDENTITY
-users (
-  id UUID PK,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  role VARCHAR(20) NOT NULL,          -- ADMIN, USER
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)
+La tabla `users` que aparecía aquí se retiró con el módulo de autenticación: no
+existe entidad de usuario, ni roles, ni tabla de sesiones. La de `revoked_tokens`
+tampoco: la migración `V11` sigue en el historial de Flyway pero ya no se usa.
 
+```sql
 -- WORKSPACE MANAGEMENT
 workspaces (
   id UUID PK,
@@ -759,7 +729,7 @@ CREATE INDEX idx_project_profiles_raw_markers ON project_profiles USING GIN (raw
 
 - **Base path:** `/api/v1`
 - **Formato:** JSON en request y response, `Content-Type: application/json`
-- **Auth:** los endpoints `/api/**` requieren `Authorization: Bearer {accessToken}`, excepto setup inicial, login, health y handshake de logs con ticket.
+- **Auth:** no hay. Los endpoints `/api/**` van abiertos; el acceso se protege enlazando a `127.0.0.1` y con `SameOriginFilter`, que devuelve `403` si la petición trae un `Origin` ajeno.
 - **IDs:** UUID en formato string
 - **Fechas:** ISO-8601 con timezone (`2026-08-13T14:30:00Z`)
 - **Paginación** (en endpoints de listado que puedan crecer mucho): query params `page` (default 0) y `size` (default 20), respuesta envuelta:
@@ -786,48 +756,7 @@ CREATE INDEX idx_project_profiles_raw_markers ON project_profiles USING GIN (raw
 
 ---
 
-### 6.1. Identity
-
-### `GET /auth/setup-status`
-Indica si falta crear el administrador y si está configurada la recuperación. **Response `200`:** `{ "setupRequired": true, "recoveryConfigured": false }`.
-
-### `POST /auth/setup`
-Crea el administrador una sola vez desde loopback. La contraseña debe tener 12–128 caracteres y se almacena con BCrypt. Recibe también una clave aleatoria de recuperación, de la cual se almacena solo el hash. **Response:** `204`; `409` si ya existe administrador.
-
-### `POST /auth/recover`
-Restablece la contraseña desde loopback con usuario y clave de recuperación. Incrementa la versión de credenciales para invalidar los JWT activos. **Response:** `204`; `401` si las credenciales de recuperación no coinciden.
-
-### `POST /auth/login`
-Valida las credenciales del administrador local y devuelve un JWT HS256 de corta duración.
-
-**Request:**
-```json
-{ "username": "dev", "password": "••••••••" }
-```
-**Response `200`:**
-```json
-{ "accessToken": "eyJhbGciOi...", "tokenType": "Bearer", "expiresAt": "...", "username": "dev" }
-```
-**Errores:** `401` credenciales inválidas (mensaje genérico). Vigencia configurable, 20 minutos por defecto.
-
-### `POST /auth/logout`
-Revoca el JWT actual server-side hasta su expiración.
-**Response:** `204 No Content`
-
-### `GET /auth/me`
-Devuelve el username del administrador autenticado.
-**Response `200`:**
-```json
-{ "username": "dev" }
-```
-**Errores:** `401` sin token o token inválido
-
-### `POST /auth/ws-ticket`
-Emite un ticket ligado a proyecto/servicio, válido 30 segundos y de un solo uso, para autorizar el handshake del WebSocket de logs.
-
----
-
-### 6.2. Workspace
+### 6.1. Workspace
 
 ### `POST /workspaces`
 Crea un Workspace apuntando a una ruta local (HU-02).
@@ -878,7 +807,7 @@ Elimina el Workspace (cascada sobre sus Project, por diseño del ERD).
 
 ---
 
-### 6.3. Project
+### 6.2. Project
 
 ### `GET /projects`
 Lista proyectos, con filtros opcionales (HU-07).
@@ -910,7 +839,7 @@ Archiva o elimina un proyecto detectado manualmente (fuera de un re-escaneo).
 
 ---
 
-### 6.4. Runtime
+### 6.3. Runtime
 
 ### `POST /projects/{id}/start`
 Inicia el entorno del proyecto (CU-05). Asíncrono.
@@ -963,7 +892,7 @@ Canal WebSocket de streaming de logs en vivo (CU-07).
 
 ---
 
-### 6.5. Resource
+### 6.4. Resource
 
 ### `POST /resources`
 Registra un recurso compartido (CU-08). Las credenciales se cifran antes de persistir.
@@ -992,7 +921,7 @@ Desasocia. **Response:** `204`
 
 ---
 
-### 6.6. Environment
+### 6.5. Environment
 
 ### `GET /projects/{id}/environment`
 Lista los archivos de entorno detectados y sus variables (solo claves, nunca valores si `isSecret`).
@@ -1013,7 +942,7 @@ Compara contra la plantilla (`.env.example`) y devuelve lo faltante (CU-10).
 
 ---
 
-### 6.7. Automation
+### 6.6. Automation
 
 ### `POST /automation/rules`
 Crea una regla (CU-11).
@@ -1070,7 +999,7 @@ Marca una alerta como resuelta manualmente.
 
 ---
 
-### 6.9. Plugin System
+### 6.7. Plugin System
 
 ### `GET /plugins`
 Lista los `PluginDescriptor` registrados (detectores de tecnología).
@@ -1085,7 +1014,7 @@ Habilita/deshabilita un plugin de detección.
 
 ---
 
-### 6.10. Editor de código
+### 6.8. Editor de código
 
 Abre un proyecto en el editor instalado en la máquina. El editor se lanza como
 proceso desacoplado: no se registra en el runtime, no genera `RuntimeInstance` ni
@@ -1124,16 +1053,10 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 
 ---
 
-### 6.11. Resumen de endpoints (referencia rápida)
+### 6.9. Resumen de endpoints (referencia rápida)
 
 | Método | Ruta | Módulo | Caso de uso |
 |---|---|---|---|
-| POST | `/auth/login` | Identity | CU-01 |
-| GET | `/auth/setup-status` | Identity | CU-01 |
-| POST | `/auth/setup` | Identity | CU-01 |
-| POST | `/auth/recover` | Identity | Recuperar el acceso local con la clave de recuperación |
-| POST | `/auth/logout` | Identity | CU-02 |
-| GET | `/auth/me` | Identity | — |
 | POST | `/workspaces` | Workspace | CU-03 |
 | GET | `/workspaces` | Workspace | — |
 | GET | `/workspaces/{id}` | Workspace | — |
@@ -1170,18 +1093,20 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 | GET | `/editors` | Editor | — |
 | POST | `/projects/{id}/open` | Editor | — |
 
-**Total documentado en este contrato: 42 endpoints** (41 REST + 1 WebSocket), incluyendo setup inicial, recuperación, ticket de autorización para logs y apertura en el editor.
+**Total documentado en este contrato: 39 endpoints**, de los cuales **31 están implementados** (30 REST + 1 WebSocket) y 8 están diseñados pero pendientes de v1.0: Resource (6) y Environment (2).
+
+No hay autenticación: el acceso se protege enlazando a `127.0.0.1` y rechazando peticiones con un `Origin` ajeno.
 
 ---
 
-### 6.12. Alcance por versión
+### 6.10. Alcance por versión
 
 | Versión | Endpoints a implementar |
 |---|---|
 | **0.1 (MVP)** | Workspace completo, Project (lectura) |
 | **0.2** | Runtime completo (start/stop/status/services/logs vía WS) |
 | **0.3** | Automation, Monitoring, Plugin |
-| **1.0** | Resource Management, Environment diffing, autenticación JWT local y estabilización/documentación |
+| **1.0** | Resource Management, Environment diffing y estabilización/documentación |
 | **Posterior a 1.0** | Preferencia de editor por proyecto, abrir archivo y línea desde el catálogo de rutas, acción de automatización `OPEN_EDITOR` |
 
 
@@ -1207,7 +1132,7 @@ Roadmap dividido en 4 versiones progresivas. Cada versión tiene un objetivo cla
 - Dashboard simple mostrando los proyectos encontrados (HU-07, HU-08)
 - Re-escaneo de Workspace sin duplicar proyectos (HU-09)
 - Información básica de Git por proyecto (HU-10)
-- Auth local — primer inicio asistido, JWT temporal y logout con revocación (HU-01)
+- Sin autenticación: enlace a `127.0.0.1` y rechazo de peticiones con `Origin` ajeno
 - Base de datos con migraciones Flyway desde el día uno
 
 **Qué aprendes técnicamente:**
@@ -1272,12 +1197,12 @@ Roadmap dividido en 4 versiones progresivas. Cada versión tiene un objetivo cla
 **Alcance:**
 - Resource Management completo: recursos compartidos entre proyectos, credenciales siempre cifradas (CU-08, CU-09)
 - Environment diffing: variables faltantes respecto a la plantilla, sin exponer valores marcados como secretos (CU-10)
-- Autenticación JWT local con configuración de primer inicio desde la UI (RF-01, RF-02; multiusuario/roles siguen fuera de alcance)
 - Documentación del proyecto: README serio, diagramas, decisiones de arquitectura documentadas (listo para portafolio)
 
 **Qué aprendes técnicamente:**
 - Cifrado de credenciales en reposo
-- JWT firmado con HS256, expiración y revocación server-side al cerrar sesión
+- Modelo de seguridad de una app local sin autenticación: enlace a loopback más
+  rechazo de orígenes ajenos, y por qué CORS solo no alcanza
 - Documentación técnica de un proyecto propio, de cara a terceros
 
 **Criterio de salida:** puedes explicar el proyecto completo en una entrevista técnica, en vivo, mostrando la aplicación corriendo de principio a fin.

@@ -23,8 +23,9 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
-	implementation 'org.springframework.boot:spring-boot-starter-security'
-	implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+	// Nota: spring-boot-starter-security y oauth2-resource-server se retiraron
+	// junto con el modulo de autenticacion. El acceso queda protegido por el
+	// bind a 127.0.0.1 y por SameOriginFilter.
 	// Métricas de procesos locales en Windows/macOS/Linux (JNA).
 	implementation 'com.github.oshi:oshi-core:7.6.1'
 	implementation 'org.flywaydb:flyway-database-postgresql'

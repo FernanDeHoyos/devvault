@@ -33,7 +33,7 @@ La versión que implemente plugins externos deberá decidir, con requisitos conc
 
 Abrir un proyecto en el IDE introduce el cuarto tipo de ejemplo, y conviene dejar por escrito por qué no lo convierte en un SPI.
 
-`EditorCatalog` es un catálogo cerrado y compilado, no un registro de extensiones. La razón es de seguridad, no de diseño: el módulo ejecuta un binario en la máquina del usuario, así que aceptar un comando libre convertiría `POST /projects/{id}/open` en ejecución remota de comandos. Lo único entre ese endpoint y el sistema es que la API está en loopback y hay JWT.
+`EditorCatalog` es un catálogo cerrado y compilado, no un registro de extensiones. La razón es de seguridad, no de diseño: el módulo ejecuta un binario en la máquina del usuario, así que aceptar un comando libre convertiría `POST /projects/{id}/open` en ejecución remota de comandos. Lo único entre ese endpoint y el sistema es que la API está enlazada a loopback y que `SameOriginFilter` rechaza las peticiones con un `Origin` ajeno.
 
 Si en el futuro se admite un editor de terceros, esa extensión entra por el mismo SDK que el resto y queda sujeta a los cinco límites de arriba. El catálogo incluido no se expone como API pública antes de que exista ese SDK con sus garantías de seguridad.
 

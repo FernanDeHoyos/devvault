@@ -4,8 +4,8 @@
 
 - **Base path:** `/api/v1`
 - **Formato:** JSON en request y response, `Content-Type: application/json`
-- **Auth:** todos los endpoints `/api/**` requieren `Authorization: Bearer {accessToken}`, excepto login, setup y recuperación local (solo loopback), health y el handshake de logs autorizado con ticket de un solo uso.
-- **Configuración inicial:** el primer inicio permite crear un único administrador desde loopback. La contraseña y la clave de recuperación se almacenan como hashes; la clave JWT se genera y persiste en la carpeta de configuración del usuario.
+- **Auth:** no hay. DevVault se ejecuta íntegro en la máquina del usuario y enlaza a `127.0.0.1` por defecto, así que la superficie expuesta es el propio equipo. Lo que sí se aplica es `SameOriginFilter`: cualquier petición con cabecera `Origin` que no sea un origen propio devuelve `403`. Eso impide que una página web cualquieravisited desde el navegador pueda lanzar peticiones locales (ver *Alcance y seguridad*).
+- **Configuración inicial:** ninguna. No hay administrador, ni contraseña, ni clave de recuperación.
 - **IDs:** UUID en formato string
 - **Fechas:** ISO-8601 con timezone (`2026-08-13T14:30:00Z`)
 - **Paginación** (en endpoints de listado que puedan crecer mucho): query params `page` (default 0) y `size` (default 20), respuesta envuelta:
@@ -32,56 +32,7 @@
 
 ---
 
-## 1. Identity
-
-### `GET /auth/setup-status`
-Indica si falta crear el administrador local. Es público para dirigir la UI al asistente inicial.
-**Response `200`:** `{ "setupRequired": true, "recoveryConfigured": false }`
-
-### `POST /auth/setup`
-Crea el administrador local una sola vez. Solo acepta conexiones loopback; username de 3–64 caracteres, contraseña de 12–128 y clave de recuperación aleatoria confirmada por la UI.
-**Request:** `{ "username": "dev", "password": "••••••••••••", "recoveryKey": "<clave aleatoria>" }`
-**Response:** `204 No Content` · `409` si ya se configuró un administrador.
-
-### `POST /auth/recover`
-Restablece la contraseña local con username y clave de recuperación. Solo acepta conexiones loopback. Incrementa la versión de credenciales, invalidando de inmediato los JWT de sesiones anteriores.
-**Request:** `{ "username": "dev", "recoveryKey": "<clave aleatoria>", "newPassword": "••••••••••••" }`
-**Response:** `204 No Content` · `401` si la clave no coincide o no hay una clave configurada.
-
-### `POST /auth/login`
-Autentica al administrador local configurado en el primer inicio y devuelve un JWT.
-
-**Request:**
-```json
-{ "username": "dev", "password": "••••••••" }
-```
-**Response `200`:**
-```json
-{ "accessToken": "eyJhbGciOi...", "tokenType": "Bearer", "expiresAt": "...", "username": "dev" }
-```
-JWT HS256, emisor `devvault`, vigencia por defecto de 20 minutos.
-**Errores:** `401` credenciales inválidas (mensaje genérico).
-
-### `POST /auth/logout`
-Revoca server-side el JWT actual hasta que expire.
-**Response:** `204 No Content`
-
-### `GET /auth/me`
-Devuelve el nombre del administrador autenticado.
-**Response `200`:**
-```json
-{ "username": "dev" }
-```
-**Errores:** `401` sin token o token inválido
-
-### `POST /auth/ws-ticket`
-Emite un ticket aleatorio, de un solo uso y válido durante 30 segundos para un par proyecto/servicio. El cliente lo presenta en la query del WebSocket de logs; el JWT nunca se envía en la URL.
-**Request:** `{ "projectId": "uuid", "serviceName": "api" }`
-**Response `200`:** `{ "ticket": "...", "expiresAt": "..." }`
-
----
-
-## 2. Workspace
+## 1. Workspace
 
 ### `POST /workspaces`
 Crea un Workspace apuntando a una ruta local (HU-02). `name` es opcional; si se omite o está vacío, se toma el nombre de la carpeta seleccionada.
@@ -137,7 +88,7 @@ Elimina el Workspace (cascada sobre sus Project, por diseño del ERD).
 
 ---
 
-## 3. Project
+## 2. Project
 
 ### `GET /projects`
 Lista proyectos, con filtros opcionales (HU-07).
@@ -183,7 +134,7 @@ Archiva o elimina un proyecto detectado manualmente (fuera de un re-escaneo).
 
 ---
 
-## 4. Runtime
+## 3. Runtime
 
 ### `POST /projects/{id}/start`
 Inicia el entorno del proyecto (CU-05). Asíncrono.
@@ -235,7 +186,7 @@ Lista los `Service` + `Container` del proyecto. Desde la extensión de ejecució
 `port` refleja el puerto **real** detectado en la salida del proceso (no necesariamente el asumido por convención — ver nota de diseño en 5.1 sobre por qué el puerto asumido no es confiable).
 
 ### `WS /projects/{id}/logs?service={serviceName}&ticket={ticket}`
-Canal WebSocket de streaming de logs en vivo (CU-07). Requiere un ticket recién emitido por `POST /auth/ws-ticket`; un ticket solo permite un handshake y queda ligado al proyecto/servicio.
+Canal WebSocket de streaming de logs en vivo (CU-07). El handshake lo valida `SameOriginFilter` cuando el navegador manda cabecera `Origin`.
 **Mensajes emitidos (servidor → cliente):**
 ```json
 { "timestamp": "...", "level": "INFO", "message": "Started BarberApplication in 2.1s" }
@@ -244,7 +195,7 @@ Canal WebSocket de streaming de logs en vivo (CU-07). Requiere un ticket recién
 
 ---
 
-## 5. Resource
+## 4. Resource
 
 ### `POST /resources`
 Registra un recurso compartido (CU-08). Las credenciales se cifran antes de persistir.
@@ -273,7 +224,7 @@ Desasocia. **Response:** `204`
 
 ---
 
-## 6. Environment
+## 5. Environment
 
 ### `GET /projects/{id}/environment`
 Lista los archivos de entorno detectados y sus variables (solo claves, nunca valores si `isSecret`).
@@ -294,7 +245,7 @@ Compara contra la plantilla (`.env.example`) y devuelve lo faltante (CU-10).
 
 ---
 
-## 7. Automation
+## 6. Automation
 
 ### `POST /automation/rules`
 Crea una regla (CU-11).
@@ -329,7 +280,7 @@ Habilita/deshabilita o edita una regla.
 
 ---
 
-## 8. Monitoring
+## 7. Monitoring
 
 ### `GET /projects/{id}/metrics`
 Muestra CPU/RAM de los runtimes del proyecto: contenedores Docker y procesos locales. Para procesos locales se mide el árbol descendiente del PID raíz con OSHI. CPU se calcula comparando muestras consecutivas. Las métricas se consultan bajo demanda y no se conserva historial. Docker debe estar disponible para medir contenedores.
@@ -353,7 +304,7 @@ Marca una alerta como resuelta manualmente.
 
 ---
 
-## 9. Plugin System
+## 8. Plugin System
 
 En el estado actual, estos endpoints administran los plugins incluidos y registrados en el classpath de DevVault. No instalan JARs, cargan código en caliente ni representan todavía una API pública para plugins externos.
 
@@ -370,7 +321,7 @@ Habilita/deshabilita un plugin de detección.
 
 ---
 
-## 9bis. Editor de código
+## 9. Editor de código
 
 Abre un proyecto en el editor instalado en la máquina. El editor se lanza como
 proceso desacoplado: no se registra en el runtime, no genera `RuntimeInstance` ni
@@ -422,15 +373,9 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 
 | Método | Ruta | Módulo | Caso de uso |
 |---|---|---|---|
-| POST | `/auth/login` | Identity | CU-01 |
-| GET | `/auth/setup-status` | Identity | CU-01 |
-| POST | `/auth/setup` | Identity | CU-01 |
-| POST | `/auth/recover` | Identity | Recuperar el acceso local con la clave de recuperación |
-| POST | `/auth/logout` | Identity | CU-02 |
-| GET | `/auth/me` | Identity | — |
-| POST | `/auth/ws-ticket` | Identity | CU-07 |
 | POST | `/workspaces` | Workspace | CU-03 |
 | GET | `/workspaces` | Workspace | — |
+| GET | `/workspaces/directories?path=` | Workspace | — |
 | GET | `/workspaces/{id}` | Workspace | — |
 | POST | `/workspaces/{id}/scan` | Workspace | CU-03 |
 | GET | `/workspaces/{id}/scan/status` | Workspace | CU-03 |
@@ -447,14 +392,14 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 | GET | `/projects/{id}/status` | Runtime | CU-05 |
 | GET | `/projects/{id}/services` | Runtime | CU-07 |
 | WS | `/projects/{id}/logs` | Runtime | CU-07 |
-| POST | `/resources` | Resource | CU-08 |
-| GET | `/resources` | Resource | — |
-| GET | `/resources/{id}` | Resource | — |
-| DELETE | `/resources/{id}` | Resource | — |
-| POST | `/projects/{id}/resources/{resourceId}` | Resource | CU-09 |
-| DELETE | `/projects/{id}/resources/{resourceId}` | Resource | — |
-| GET | `/projects/{id}/environment` | Environment | CU-10 |
-| GET | `/projects/{id}/environment/diff` | Environment | CU-10 |
+| POST | `/resources` | Resource *(v1.0)* | CU-08 |
+| GET | `/resources` | Resource *(v1.0)* | — |
+| GET | `/resources/{id}` | Resource *(v1.0)* | — |
+| DELETE | `/resources/{id}` | Resource *(v1.0)* | — |
+| POST | `/projects/{id}/resources/{resourceId}` | Resource *(v1.0)* | CU-09 |
+| DELETE | `/projects/{id}/resources/{resourceId}` | Resource *(v1.0)* | — |
+| GET | `/projects/{id}/environment` | Environment *(v1.0)* | CU-10 |
+| GET | `/projects/{id}/environment/diff` | Environment *(v1.0)* | CU-10 |
 | POST | `/automation/rules` | Automation | CU-11 |
 | GET | `/automation/rules` | Automation | — |
 | GET | `/automation/rules/{id}` | Automation | — |
@@ -468,7 +413,9 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 | GET | `/editors` | Editor | — |
 | POST | `/projects/{id}/open` | Editor | — |
 
-**Total: 42 endpoints** (41 REST + 1 WebSocket), incluyendo configuración inicial, recuperación, autorización de logs y apertura en el editor.
+**Total: 39 endpoints** en el contrato. **31 están implementados** (30 REST + 1 WebSocket) y 8 están diseñados pero pendientes de v1.0: Resource (6) y Environment (2), marcados con *(v1.0)*.
+
+No hay autenticación: el acceso se protege enlazando a `127.0.0.1` y rechazando peticiones con un `Origin` ajeno.
 
 ---
 
@@ -479,7 +426,7 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 | **0.1 (MVP)** | Workspace completo, Project (lectura) |
 | **0.2** | Runtime completo (start/stop/status/services/logs vía WS) |
 | **0.3** | Automation, Monitoring, Plugin |
-| **1.0** | Resource Management, Environment diffing, autenticación JWT local y estabilización/documentación |
+| **1.0** | Resource Management, Environment diffing y estabilización/documentación |
 | **Posterior a 1.0** | Preferencia de editor por proyecto, abrir archivo y línea desde el catálogo de rutas, acción de automatización `OPEN_EDITOR` |
 
 Con esto ya tienes el contrato completo antes de escribir un solo `@RestController`.

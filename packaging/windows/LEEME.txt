@@ -11,9 +11,21 @@ REQUISITOS
 INICIO
 1. Extrae la carpeta DevVault en una ubicación permanente.
 2. Haz doble clic en Iniciar-DevVault.bat.
-3. Se abre el navegador en http://localhost:5050/login
-4. En el primer inicio, crea tu contraseña y guarda la clave de recuperación que
-   muestra la UI.
+3. Se abre el navegador en http://localhost:5050
+
+No hay contraseña ni asistente: la aplicación abre directamente en el panel.
+
+SEGURIDAD
+- DevVault no lleva autenticación. Es una herramienta local.
+- El backend enlaza a 127.0.0.1, así que la API solo es alcanzable desde este
+  equipo, no desde la red.
+- Además rechaza cualquier petición que llegue con una cabecera Origin de otro
+  sitio, para que una página web cualquiera no pueda mandar acciones a DevVault
+  desde tu navegador.
+- Lo que NO cubre: otro programa que se ejecute con tu usuario puede hablar con
+  la API sin restricción.
+- No edites server.address para escuchar en 0.0.0.0. Eso abriría la API a la red
+  sin ninguna protección.
 
 DIRECCIÓN
 - La preview sirve la UI y la API en el mismo origen, en el puerto 5050. Usa el
@@ -30,7 +42,6 @@ Haz doble clic en Detener-DevVault.bat. PostgreSQL se detiene, pero sus datos qu
 
 DATOS Y REGISTROS
 - Base de datos: volumen Docker local devvault-preview_postgres_data.
-- Configuración de acceso: %LOCALAPPDATA%\DevVault\auth.json.
 - Registros del backend: %LOCALAPPDATA%\DevVault\preview\backend.out.log y backend.err.log.
 - DevVault solo enlaza su API a 127.0.0.1.
 

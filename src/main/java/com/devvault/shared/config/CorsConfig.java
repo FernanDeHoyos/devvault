@@ -5,9 +5,17 @@ import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * Permite que el frontend (Vite, puerto 5173 por defecto) llame a la API
- * REST corriendo en 8080 — sin esto el navegador bloquea toda petición
- * cross-origin antes de que llegue al controlador.
+ * Permite que el frontend servido por Vite (puerto 5050 en desarrollo) llame a
+ * la API REST del 8080 — sin esto el navegador bloquea la lectura de la
+ * respuesta antes de que llegue al controlador.
+ *
+ * <p>Esto solo aplica en desarrollo. En la preview empaquetada la UI se sirve
+ * desde el propio backend, asi que todo es del mismo origen y no hay CORS que
+ * negociar.
+ *
+ * <p>Lo que CORS no cubre, y por eso existe {@link SameOriginFilter}: CORS
+ * regula que puede <em>leer</em> una respuesta, no quien puede <em>enviar</em> la
+ * peticion.
  */
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {

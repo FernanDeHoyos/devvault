@@ -6,7 +6,7 @@ DevVault es una plataforma local que descubre, entiende y administra los ecosist
 
 **Problema que resuelve:** cuando trabajas en varios proyectos, cada uno con su propio stack (Spring Boot, React, Postgres, Redis, Docker...), pierdes tiempo recordando cómo levantar cada uno, qué variables de entorno le faltan, o si un contenedor se cayó. DevVault centraliza eso.
 
-**Usuario objetivo (v1):** tú mismo, un desarrollador que trabaja con múltiples proyectos locales. La autenticación usa un administrador local creado en el primer inicio; no hay registro ni multiusuario.
+**Usuario objetivo (v1):** tú mismo, un desarrollador que trabaja con múltiples proyectos locales. DevVault no lleva autenticación: se ejecuta íntegro en la máquina del usuario, enlazado a `127.0.0.1`, y rechaza las peticiones con un `Origin` ajeno.
 
 ---
 
@@ -17,9 +17,11 @@ Agrupados por bounded context, con prioridad (M = MVP 0.1, S = 0.2, L = 0.3+).
 ### 2.1 Identity
 | ID | Requisito | Prioridad |
 |---|---|---|
-| RF-01 | El sistema permite login local con usuario/contraseña | M |
-| RF-02 | El sistema emite un JWT válido por sesión | M |
-| RF-03 | El sistema soporta roles (ADMIN, USER) para preparar multiusuario futuro | S |
+| RF-01 | La API solo es alcanzable desde el propio equipo: enlace a `127.0.0.1` | M |
+| RF-02 | El backend rechaza peticiones con un `Origin` ajeno, para que una página web no pueda accionarlo | M |
+
+RF-03 (roles ADMIN/USER) se retiró con el módulo de autenticación. DevVault no
+tiene usuarios, ni roles, ni sesiones.
 
 ### 2.2 Workspace Management
 | ID | Requisito | Prioridad |
@@ -90,22 +92,6 @@ Agrupados por bounded context, con prioridad (M = MVP 0.1, S = 0.2, L = 0.3+).
 ---
 
 ## 4. Casos de uso
-
-### CU-01 — Iniciar sesión
-- **Actor:** Usuario
-- **Precondición:** si es el primer inicio, aún no existe un administrador local
-- **Flujo principal:**
-  1. En el primer inicio, el usuario crea un administrador desde la UI
-  2. El sistema guarda el hash de contraseña y genera automáticamente la clave JWT local
-  3. En los siguientes inicios, valida las credenciales y emite un JWT HS256 de duración limitada
-- **Flujo alterno:** credenciales inválidas → `401 Unauthorized` genérico
-- **Postcondición:** el usuario queda autenticado para las siguientes peticiones
-
-### CU-02 — Cerrar sesión
-- **Actor:** Usuario
-- **Precondición:** sesión activa (JWT válido)
-- **Flujo principal:** el sistema revoca el JWT actual server-side y el cliente elimina el token de su sesión
-- **Postcondición:** el token deja de ser aceptado por el sistema
 
 ### CU-03 — Crear y escanear un Workspace
 - **Actor:** Usuario
@@ -213,7 +199,7 @@ Agrupados por bounded context, con prioridad (M = MVP 0.1, S = 0.2, L = 0.3+).
 ## 5. Modelo de dominio: reglas de negocio
 
 Las entidades completas con sus atributos están en el ERD de la sección 6. Aquí quedan las reglas de negocio que ese diagrama no puede expresar y que debes validar en la capa de aplicación (no solo confiar en las constraints de la base de datos):
-- Un `Project` pertenece a un único `Workspace`; un `Workspace` a un único `User`.
+- Un `Project` pertenece a un único `Workspace`. No hay entidad `User`: el workspace no tiene dueño registrado.
 - Un `Resource` puede asociarse a N `Project` y viceversa (tabla puente).
 - Un `RuntimeInstance` agrupa el estado de todos los `Container` de un `Project` en un momento dado — el estado global es `RUNNING` solo si todos sus servicios pasan el health check.
 - Una `AutomationRule` sin `Trigger` no puede activarse (invariante de validación al guardar).
@@ -255,16 +241,8 @@ A diferencia de Docker (donde `docker logs -f` permite "reconectarse" al histori
 
 ```mermaid
 erDiagram
-    USER {
-        string id PK
-        string email
-        string passwordHash
-        string role
-        datetime createdAt
-    }
     WORKSPACE {
         string id PK
-        string userId FK
         string name
         string path
         datetime createdAt
@@ -385,7 +363,6 @@ erDiagram
         string version
         boolean enabled
     }
-    USER ||--o{ WORKSPACE : "owns"
     WORKSPACE ||--o{ PROJECT : "contains"
     PROJECT ||--|| PROJECT_PROFILE : "has"
     PROJECT ||--o{ SERVICE : "defines"
@@ -416,16 +393,10 @@ erDiagram
 
 Prefijo base: `/api/v1`
 
-### Identity
-```
-POST   /auth/login              → { token }
-GET    /auth/me                 → perfil del usuario autenticado
-```
-
 ### Workspace
 ```
 POST   /workspaces              → crea un Workspace
-GET    /workspaces              → lista Workspaces del usuario
+GET    /workspaces              → lista los Workspaces registrados
 POST   /workspaces/{id}/scan    → dispara un escaneo (asíncrono, devuelve 202)
 GET    /workspaces/{id}/scan/status → estado del último escaneo
 ```
@@ -479,11 +450,6 @@ Un solo deployable, pero con módulos internos aislados por paquete y con comuni
 
 ```
 com.devvault
-├── identity
-│   ├── domain          (User, Role)
-│   ├── application      (LoginUseCase, JwtService)
-│   ├── infrastructure    (UserRepository, SecurityConfig)
-│   └── api               (AuthController)
 ├── workspace
 │   ├── domain
 │   ├── application
@@ -573,16 +539,6 @@ SDK público · descubrimiento/carga de paquetes externos · compatibilidad de v
 
 Formato: `Como [rol], quiero [acción], para [beneficio]`, con criterios de aceptación en Gherkin y trazabilidad a los RF/CU definidos antes. Estimación en talla de camiseta (S/M/L) solo como referencia de esfuerzo relativo.
 
-### HU-01 — Configuración y acceso local de administrador
-**Como** desarrollador, **quiero** configurar una contraseña desde la UI en el primer inicio, **para** proteger DevVault sin editar variables del sistema.
-- **Criterios de aceptación:**
-  - El primer inicio permite crear un solo administrador; los siguientes presentan login
-  - Los endpoints `/api/**` exigen JWT válido salvo setup inicial, login, health y handshake de logs con ticket
-  - El JWT tiene expiración configurable y el cierre de sesión lo revoca hasta su expiración
-  - La UI conserva el token solo durante la sesión del navegador
-- **Prioridad:** Alta · **Estimación:** S
-- **Trazabilidad:** RF-01/RF-02 (diferidos), decisión de diseño de la conversación anterior
-
 ### HU-02 — Crear un Workspace
 **Como** desarrollador, **quiero** registrar una carpeta local como Workspace, **para** que DevVault sepa dónde buscar mis proyectos.
 - **Criterios de aceptación:**
@@ -663,7 +619,6 @@ Formato: `Como [rol], quiero [acción], para [beneficio]`, con criterios de acep
 
 | HU | Prioridad | Estimación |
 |---|---|---|
-| HU-01 Configuración de administrador | Alta | S |
 | HU-02 Crear Workspace | Alta | S |
 | HU-03 Listar Workspaces | Media | S |
 | HU-04 Escanear Workspace | Alta | M |

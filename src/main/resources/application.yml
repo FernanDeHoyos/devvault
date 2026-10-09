@@ -26,8 +26,6 @@ server:
   address: ${DEVVAULT_BIND_ADDRESS:127.0.0.1}
 
 devvault:
-  auth:
-    token-duration-minutes: ${DEVVAULT_JWT_DURATION_MINUTES:20}
   runtime:
     # Suelo del tiempo de espera del arranque de un proceso local. El valor que
     # declara cada plugin es un mínimo adicional, no un tope: una primera
