@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -83,8 +84,9 @@ class WorkspaceControllerIT {
      * @throws Exception
      */
     @Test
-    void shouldRejectNonExistentPath() throws Exception {
-        CreatedWorkspaceRequest request = new CreatedWorkspaceRequest("Invalid Workspace", "/non/existent/path");
+    void shouldRejectNonExistentPath(@TempDir Path tempDir) throws Exception {
+        String nonExistentPath = tempDir.resolve("carpeta-que-no-existe").toString();
+        CreatedWorkspaceRequest request = new CreatedWorkspaceRequest("Invalid Workspace", nonExistentPath);
 
         mockMvc.perform(post("/api/v1/workspaces")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -104,10 +106,9 @@ class WorkspaceControllerIT {
      * @throws Exception
      */
     @Test
-    void shouldRejectDuplicatePath() throws Exception {
-        String tempDir = Files.createTempDirectory("devvault-test-duplicate").toString();
-        CreatedWorkspaceRequest request = new CreatedWorkspaceRequest("Duplicate Workspace", tempDir);
-        
+    void shouldRejectDuplicatePath(@TempDir Path tempDir) throws Exception {
+        CreatedWorkspaceRequest request = new CreatedWorkspaceRequest("Duplicate Workspace", tempDir.toString());
+
         mockMvc.perform(post("/api/v1/workspaces")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
