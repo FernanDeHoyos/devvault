@@ -81,3 +81,98 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/smoke-test-windows.ps1
+
+      - name: Package preview (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version="0.0.0-ci"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          bash packaging/linux/Empaquetar-Preview.sh "$version"
+
+      - name: Package preview (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = '0.0.0-ci'
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME -replace '^v', '' }
+          ./packaging/windows/Empaquetar-Preview.ps1 -Version $version
+
+      - name: Create SHA-256 checksum (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version="0.0.0-ci"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          archive="$(find build/distribution -maxdepth 1 -name "DevVault-$version-linux-*.tar.gz" -print -quit)"
+          [[ -n "$archive" ]] || { echo 'No se encontró el tar.gz de Linux.' >&2; exit 1; }
+          (cd build/distribution && sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256")
+
+      - name: Create SHA-256 checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = '0.0.0-ci'
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME -replace '^v', '' }
+          $archive = Get-ChildItem build/distribution -Filter "DevVault-$version-windows-*.zip" | Select-Object -First 1
+          if (-not $archive) { throw 'No se encontró el ZIP de preview.' }
+          $hash = (Get-FileHash -Algorithm SHA256 $archive.FullName).Hash.ToLowerInvariant()
+          "$hash  $($archive.Name)" | Set-Content -NoNewline "$($archive.FullName).sha256"
+
+      - name: Upload Linux package
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DevVault-Preview-Linux
+          path: |
+            build/distribution/*.tar.gz
+            build/distribution/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows package
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DevVault-Preview-Windows
+          path: |
+            build/distribution/*.zip
+            build/distribution/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: DevVault-Preview-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release assets
+        shell: bash
+        run: |
+          shopt -s nullglob
+          assets=(release-assets/*.zip release-assets/*.tar.gz)
+          checksums=(release-assets/*.sha256)
+          [[ ${#assets[@]} -eq 2 ]] || { echo 'Se requieren paquetes Windows y Linux.' >&2; exit 1; }
+          [[ ${#checksums[@]} -eq 2 ]] || { echo 'Faltan checksums SHA-256.' >&2; exit 1; }
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          if [[ "$version" == *-* ]]; then
+            gh release create "$tag" release-assets/* --title "DevVault $version" --generate-notes --prerelease
+          else
+            gh release create "$tag" release-assets/* --title "DevVault $version" --generate-notes
+          fi

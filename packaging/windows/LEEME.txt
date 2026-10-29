@@ -31,9 +31,8 @@ DIRECCIÓN
 - La preview sirve la UI y la API en el mismo origen, en el puerto 5050. Usa el
   5050 y no el 8080 para dejar libre el 8080, así puedes tener el backend de
   desarrollo corriendo al mismo tiempo que pruebas el paquete.
-- Las rutas que la UI usa son /login, /setup, /recover, /projects, /workspaces,
-  /docker, /logs, /automation, /monitoring y /settings. Cualquier otra ruta
-  devuelve 404 a proposito: solo se reenvian las que existen en la aplicacion.
+- La interfaz abre en http://localhost:5050/. Las rutas disponibles incluyen
+  proyectos, workspaces, Docker, logs, automatización, monitoring y puertos.
 - El puerto se puede cambiar con la variable DEVVAULT_PREVIEW_PORT antes de
   iniciar el paquete.
 
@@ -44,6 +43,9 @@ DATOS Y REGISTROS
 - Base de datos: volumen Docker local devvault-preview_postgres_data.
 - Registros del backend: %LOCALAPPDATA%\DevVault\preview\backend.out.log y backend.err.log.
 - DevVault solo enlaza su API a 127.0.0.1.
+
+LICENCIA
+- DevVault Backend y UI se distribuyen bajo Apache License 2.0. Consulta LICENSE.
 
 PROYECTOS JAVA
 - DevVault se ejecuta con el runtime de Java 17 que incluye el paquete, pero no

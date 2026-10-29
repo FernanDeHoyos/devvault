@@ -12,7 +12,7 @@ $stderrLog = Join-Path $dataRoot "backend.err.log"
 # El health check va contra 127.0.0.1 porque es la dirección a la que el backend
 # enlaza; el navegador se abre con localhost, que es lo que pide la guía.
 $apiBaseUrl = "http://127.0.0.1:5050"
-$appUrl = "http://localhost:5050/login"
+$appUrl = "http://localhost:5050/"
 $appPort = 5050
 
 function Stop-WithMessage([string]$message) {

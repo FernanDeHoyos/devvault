@@ -1,0 +1,31 @@
+DEVVAULT PREVIEW PARA LINUX
+
+REQUISITOS
+- Linux de la misma arquitectura con la que se generó el paquete (el artefacto
+  oficial de CI se genera para x86_64).
+- Docker Engine con el plugin Docker Compose, instalado e iniciado.
+- curl para comprobar que la aplicación quedó lista.
+
+INICIO
+1. Extrae el archivo .tar.gz en una ubicación permanente.
+2. Entra en la carpeta extraída y ejecuta ./Iniciar-DevVault.sh.
+3. Se abre http://localhost:5050 si xdg-open está disponible.
+
+CIERRE
+Ejecuta ./Detener-DevVault.sh. PostgreSQL se detiene, pero los datos quedan
+guardados en el volumen Docker devvault-preview_postgres_data.
+
+DATOS Y REGISTROS
+- Estado, PID y logs: ${XDG_STATE_HOME:-~/.local/state}/devvault/preview.
+- La base de datos PostgreSQL usa el puerto local 5434.
+- El backend escucha en 127.0.0.1:5050.
+
+SEGURIDAD
+- DevVault es una aplicación local; no expongas sus puertos a redes no confiables.
+- La API no está diseñada para publicarse detrás de una IP de red sin una
+  configuración de seguridad adicional.
+
+LICENCIA
+Backend y UI se distribuyen bajo Apache License 2.0. Este paquete incluye
+LICENSE. Los avisos de licencias de dependencias de terceros se publicarán
+junto con el release cuando termine su auditoría.

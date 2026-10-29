@@ -137,6 +137,7 @@ Copy-Item (Join-Path $PSScriptRoot "Detener-DevVault.ps1") $stageRoot
 Copy-Item (Join-Path $PSScriptRoot "Iniciar-DevVault.bat") $stageRoot
 Copy-Item (Join-Path $PSScriptRoot "Detener-DevVault.bat") $stageRoot
 Copy-Item (Join-Path $PSScriptRoot "LEEME.txt") $stageRoot
+Copy-Item (Join-Path $backendRoot "LICENSE") $stageRoot
 
 Write-Host "4/4 Comprimiendo el paquete..."
 if (Test-Path $archive) { Remove-Item -LiteralPath $archive -Force }

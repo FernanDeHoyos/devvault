@@ -370,6 +370,20 @@ Si la UI está en otro sitio o el JDK no está en `JAVA_HOME`, indícalo explíc
 
 El ZIP resultante queda en `build\distribution`. El usuario lo extrae y ejecuta `Iniciar-DevVault.bat`; para cerrar usa `Detener-DevVault.bat`. La base de datos se guarda en un volumen Docker persistente y los registros del backend en `%LOCALAPPDATA%\DevVault\preview`. La guía incluida en el ZIP está en `LEEME.txt`.
 
+## Preview empaquetada para Linux
+
+Se puede generar un `.tar.gz` portable desde Linux con JDK 17, Node.js/npm y el
+submódulo UI inicializado:
+
+```bash
+bash packaging/linux/Empaquetar-Preview.sh 0.4.0-preview.1
+```
+
+El paquete integra la UI en el JAR y contiene un runtime Java 17 reducido,
+scripts de inicio y cierre y la licencia Apache-2.0. El equipo donde se ejecute
+necesita Docker Engine con el plugin Compose; para generar el paquete hacen
+falta además JDK 17 y Node.js/npm. El artefacto queda en `build/distribution`.
+
 ## API principal
 
 Base path: `/api/v1`.
