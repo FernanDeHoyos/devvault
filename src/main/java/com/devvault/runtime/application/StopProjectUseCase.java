@@ -18,7 +18,6 @@ import com.devvault.runtime.domain.ServiceStatus;
 import com.devvault.runtime.infrastructure.ContainerRepository;
 import com.devvault.runtime.infrastructure.ServiceRepository;
 import java.nio.file.Path;
-import java.nio.file.Files;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -86,13 +85,21 @@ public class StopProjectUseCase {
         if (container.getKind() == ContainerKind.LOCAL_PROCESS) {
             hasLocalProcess = true;
 
-            boolean killed = localProcessManager.stop(projectId);
+            boolean killed = localProcessManager.stop(
+                    projectId,
+                    container.getPid(),
+                    instance.getStartedAt());
 
             log.info(
                     ">>> Proceso local del proyecto {} detenido: {}",
                     projectId,
                     killed
             );
+            if (!killed) {
+                throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
+                        "No se pudo detener el proceso local del proyecto " + projectId
+                                + "; se conserva el estado activo hasta confirmar la parada");
+            }
 
             // Actualizamos el estado del contenedor
             container.updateState("stopped");
@@ -109,9 +116,17 @@ public class StopProjectUseCase {
     // Si no hay procesos locales
     if (!hasLocalProcess) {
         // Ningún servicio local — asumimos que es Docker Compose, comportamiento original
-        Path composeFile = Path.of(project.path()).resolve("docker-compose.yml");
+        Path composeFile = composeRunner.findComposeFile(Path.of(project.path())).orElse(null);
         String composeProjectName = "devvault-" + projectId.toString().replace("-", "");
-        composeRunner.down(composeFile, composeProjectName);
+        if (composeFile == null) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "No se encontró un archivo Compose para detener el proyecto");
+        }
+        DockerComposeRunner.ProcessResult result = composeRunner.down(composeFile, composeProjectName);
+        if (!result.isSuccess()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "No se pudo detener Docker Compose: " + result.output());
+        }
 
     // Docker Compose detenido correctamente.
     // Actualizamos el estado persistido en DevVault.
@@ -150,18 +165,17 @@ public class StopProjectUseCase {
         Instant expectedStartedAt = latestInstance == null ? null : latestInstance.getStartedAt();
         boolean runtimeActive = latestInstance != null && latestInstance.isActive();
         List<Service> services = serviceRepository.findByProjectId(projectId);
-        Path composeFile = Path.of(project.path()).resolve("docker-compose.yml");
+        Path composeFile = composeRunner.findComposeFile(Path.of(project.path())).orElse(null);
         boolean dockerRuntimeNeedsStop = false;
 
         for (Service service : services) {
             Optional<Container> containerOpt = containerRepository.findByServiceId(service.getId());
             if (containerOpt.isEmpty()) {
                 if (service.getStatus() != ServiceStatus.STOPPED) {
-                    if (Files.exists(composeFile)) {
+                    if (composeFile != null) {
                         dockerRuntimeNeedsStop = true;
                     } else {
-                        Process managed = localProcessManager.get(projectId);
-                        if (managed == null || !managed.isAlive()) {
+                        if (!localProcessManager.isAlive(projectId)) {
                             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                                     "Hay un servicio activo sin información de proceso; el proyecto no fue eliminado");
                         }
@@ -173,16 +187,14 @@ public class StopProjectUseCase {
             if (container.getKind() == ContainerKind.LOCAL_PROCESS) {
                 Integer pid = container.getPid();
                 boolean pidAlive = pid != null && ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
-                boolean managedAlive = localProcessManager.get(projectId) != null
-                        && localProcessManager.get(projectId).isAlive();
+                boolean managedAlive = localProcessManager.isAlive(projectId);
                 if (pidAlive || managedAlive) {
                     boolean stopped = localProcessManager.stop(projectId, pid, expectedStartedAt);
                     if (!stopped || (pid != null && ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false))) {
                         throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                                 "No se pudo detener el proceso local PID " + pid + "; el proyecto no fue eliminado");
                     }
-                    Process managedProcess = localProcessManager.get(projectId);
-                    if (managedProcess != null && managedProcess.isAlive()) {
+                    if (localProcessManager.isAlive(projectId)) {
                         throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                                 "No se pudo detener el proceso local; el proyecto no fue eliminado");
                     }
@@ -199,22 +211,21 @@ public class StopProjectUseCase {
             }
         }
 
-        Process managedProcess = localProcessManager.get(projectId);
-        if (managedProcess != null && managedProcess.isAlive()) {
+        if (localProcessManager.isAlive(projectId)) {
             localProcessManager.stop(projectId);
-            if (managedProcess.isAlive()) {
+            if (localProcessManager.isAlive(projectId)) {
                 throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                         "No se pudo detener el proceso local; el proyecto no fue eliminado");
             }
         }
 
-        if (runtimeActive && Files.exists(composeFile)) {
+        if (runtimeActive && composeFile != null) {
             dockerRuntimeNeedsStop = true;
         }
         if (dockerRuntimeNeedsStop) {
-            if (!Files.exists(composeFile)) {
+            if (composeFile == null) {
                 throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "Hay servicios Docker activos, pero no se encontró docker-compose.yml; el proyecto no fue eliminado");
+                        "Hay servicios Docker activos, pero no se encontró un archivo Compose; el proyecto no fue eliminado");
             }
             String composeProjectName = "devvault-" + projectId.toString().replace("-", "");
             DockerComposeRunner.ProcessResult result = composeRunner.down(composeFile, composeProjectName);

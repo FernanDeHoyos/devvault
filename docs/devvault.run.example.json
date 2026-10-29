@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "service": {
+    "name": "api",
+    "command": ["./gradlew", "bootRun"],
+    "windowsCommand": ["cmd.exe", "/c", "gradlew.bat", "bootRun"],
+    "workingDirectory": ".",
+    "port": 8080,
+    "healthCheckUrl": "http://127.0.0.1:8080/health",
+    "startupTimeoutSeconds": 300,
+    "environment": {
+      "SPRING_PROFILES_ACTIVE": "dev"
+    }
+  }
+}

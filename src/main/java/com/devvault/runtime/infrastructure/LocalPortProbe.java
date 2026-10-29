@@ -10,6 +10,8 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -40,11 +42,16 @@ import org.springframework.stereotype.Component;
  * recorre todo el árbol.
  *
  * <p>En Windows usa {@code netstat -ano -p tcp}; en Linux y macOS,
- * {@code lsof -nP -iTCP -sTCP:LISTEN}. Si la utilidad no existe, devuelve una
+ * {@code lsof -nP -iTCP -sTCP:LISTEN}; en Linux, si falta, intenta {@code ss -lptn}.
+ * Si tampoco existe, devuelve una
  * lista vacía y el resto del health check sigue funcionando igual.
  */
 @Component
 public class LocalPortProbe {
+
+    public record PortListener(int port, Long pid, String processName) {}
+
+    public record ListenerScan(boolean available, Map<Integer, List<PortListener>> listenersByPort) {}
 
     private static final Logger log = LoggerFactory.getLogger(LocalPortProbe.class);
 
@@ -57,6 +64,7 @@ public class LocalPortProbe {
     /** Columna de dirección local: {@code 0.0.0.0:8080}, {@code [::]:8080}, {@code 127.0.0.1:8080}. */
     private static final Pattern LOCAL_ADDRESS = Pattern.compile("^.*:(\\d{1,5})$");
     private static final Pattern PID_TOKEN = Pattern.compile("^\\d+$");
+    private static final Pattern PID_ASSIGNMENT = Pattern.compile("pid=(\\d+)");
 
     /**
      * Devuelve los puertos TCP en escucha del proceso indicado y de todos sus
@@ -87,7 +95,8 @@ public class LocalPortProbe {
 
     private List<Integer> fromLsof(Set<Long> pids) {
         String pidList = pids.stream().map(String::valueOf).collect(Collectors.joining(","));
-        return parse(run("lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", pidList), pids);
+        List<Integer> ports = parse(run("lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", pidList), pids);
+        return ports.isEmpty() ? parse(run("ss", "-lptn"), pids) : ports;
     }
 
     private Set<Long> processTree(ProcessHandle root) {
@@ -104,7 +113,7 @@ public class LocalPortProbe {
      * Filtra las filas de netstat/lsof que corresponden a nuestros PIDs y extrae
      * el puerto local de cada una.
      */
-    private List<Integer> parse(List<String> lines, Set<Long> pids) {
+    List<Integer> parse(List<String> lines, Set<Long> pids) {
         if (lines == null) {
             return List.of();
         }
@@ -130,18 +139,63 @@ public class LocalPortProbe {
         return List.copyOf(ports);
     }
 
-    /**
-     * El PID no está en la misma columna según la utilidad: en netstat es la
-     * última de la fila, en lsof va justo después de {@code (LISTEN)}.
-     */
+    /** Escanea listeners TCP una vez y devuelve los que usan los puertos solicitados. */
+    public ListenerScan scanListeners(Set<Integer> requestedPorts) {
+        if (requestedPorts == null || requestedPorts.isEmpty()) {
+            return new ListenerScan(true, Map.of());
+        }
+
+        List<String> lines;
+        if (isWindows()) {
+            lines = run("netstat", "-ano", "-p", "tcp");
+        } else {
+            lines = run("lsof", "-nP", "-iTCP", "-sTCP:LISTEN");
+            if (lines == null) {
+                lines = run("ss", "-lptn");
+            }
+        }
+        if (lines == null) {
+            return new ListenerScan(false, Map.of());
+        }
+
+        Map<Integer, Map<String, PortListener>> found = new LinkedHashMap<>();
+        for (String line : lines) {
+            if (line.isBlank() || !LISTENING_ROW.matcher(line).find()) {
+                continue;
+            }
+            String[] tokens = line.trim().split("\\s+");
+            Integer port = extractLocalPort(tokens);
+            if (port == null || !requestedPorts.contains(port)) {
+                continue;
+            }
+            Long pid = extractPid(tokens);
+            String processName = processName(pid);
+            PortListener listener = new PortListener(port, pid, processName);
+            String key = pid == null ? processName : String.valueOf(pid);
+            found.computeIfAbsent(port, ignored -> new LinkedHashMap<>()).putIfAbsent(key, listener);
+        }
+
+        Map<Integer, List<PortListener>> result = new LinkedHashMap<>();
+        found.forEach((port, owners) -> result.put(port, List.copyOf(owners.values())));
+        return new ListenerScan(true, Map.copyOf(result));
+    }
+
+    /** El PID aparece en columnas distintas según la utilidad del sistema. */
     private Long extractPid(String[] tokens) {
         for (int i = 0; i < tokens.length; i++) {
+            Matcher assignment = PID_ASSIGNMENT.matcher(tokens[i]);
+            if (assignment.find()) {
+                return Long.parseLong(assignment.group(1));
+            }
             if (tokens[i].contains("(LISTEN)")) {
                 if (i + 1 < tokens.length && PID_TOKEN.matcher(tokens[i + 1]).matches()) {
                     return Long.parseLong(tokens[i + 1]);
                 }
-                return null;
             }
+        }
+        // lsof's tabular output places PID in the second column.
+        if (tokens.length > 1 && PID_TOKEN.matcher(tokens[1]).matches()) {
+            return Long.parseLong(tokens[1]);
         }
         String last = tokens[tokens.length - 1];
         return PID_TOKEN.matcher(last).matches() ? Long.parseLong(last) : null;
@@ -160,6 +214,23 @@ public class LocalPortProbe {
             }
         }
         return null;
+    }
+
+    private String processName(Long pid) {
+        if (pid == null) {
+            return "Proceso sin PID visible";
+        }
+        try {
+            return ProcessHandle.of(pid)
+                    .flatMap(handle -> handle.info().command())
+                    .map(command -> {
+                        int separator = Math.max(command.lastIndexOf('/'), command.lastIndexOf('\\'));
+                        return separator >= 0 ? command.substring(separator + 1) : command;
+                    })
+                    .orElse("PID " + pid);
+        } catch (SecurityException e) {
+            return "PID " + pid;
+        }
     }
 
     /**

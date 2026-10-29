@@ -26,7 +26,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
@@ -41,8 +40,7 @@ import java.util.regex.Pattern;
 public class StartProjectUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(StartProjectUseCase.class);
-    private static final int HEALTH_CHECK_ATTEMPTS = 10;
-    private static final long HEALTH_CHECK_INTERVAL_MS = 3000;
+    private static final long COMPOSE_READINESS_POLL_MS = 1000;
 
     private final ProjectLookupService projectLookupService;
     private final DockerComposeRunner composeRunner;
@@ -53,6 +51,7 @@ public class StartProjectUseCase {
     private final LocalProcessLogHub localProcessLogHub;
     private final LocalProcessManager localProcessManager;
     private final LocalProcessHealthProbe localProcessHealthProbe;
+    private final ProjectRunRecipeLoader projectRunRecipeLoader;
     private final ApplicationEventPublisher eventPublisher;
 
     private final List<TechnologyPlugin> technologyPlugins;
@@ -77,6 +76,7 @@ public class StartProjectUseCase {
             LocalProcessLogHub localProcessLogHub,
             LocalProcessManager localProcessManager,
             LocalProcessHealthProbe localProcessHealthProbe,
+            ProjectRunRecipeLoader projectRunRecipeLoader,
             ApplicationEventPublisher eventPublisher,
             @Value("${devvault.runtime.startup-timeout-seconds:300}") int baseStartupTimeoutSeconds) {
         this.projectLookupService = projectLookupService;
@@ -89,6 +89,7 @@ public class StartProjectUseCase {
         this.localProcessLogHub = localProcessLogHub;
         this.localProcessManager = localProcessManager;
         this.localProcessHealthProbe = localProcessHealthProbe;
+        this.projectRunRecipeLoader = projectRunRecipeLoader;
         this.eventPublisher = eventPublisher;
         this.baseStartupTimeoutSeconds = baseStartupTimeoutSeconds;
     }
@@ -119,8 +120,8 @@ public class StartProjectUseCase {
         }
 
         Path projectPath = Path.of(project.path());
-        Path composeFile = projectPath.resolve("docker-compose.yml");
-        boolean hasDockerCompose = Files.exists(composeFile);
+        Path composeFile = composeRunner.findComposeFile(projectPath).orElse(null);
+        boolean hasDockerCompose = composeFile != null;
 
         // NUEVO: aunque el estado guardado sea FAILED, el proceso del SO puede
         // seguir vivo (health check falso negativo). No relanzar en ese caso.
@@ -129,9 +130,9 @@ public class StartProjectUseCase {
                     "Ya hay un proceso local corriendo para este proyecto — detenlo antes de reiniciar");
         }
         log.info(
-                ">>> Proyecto: {} | docker-compose.yml existe: {}",
+                ">>> Proyecto: {} | archivo Compose: {}",
                 projectPath,
-                hasDockerCompose);
+                composeFile == null ? "ninguno" : composeFile.getFileName());
 
         if (hasDockerCompose) {
             return executeDockerCompose(
@@ -143,7 +144,7 @@ public class StartProjectUseCase {
     }
 
     /**
-     * Ejecuta un proyecto sin docker-compose.yml
+     * Ejecuta un proyecto sin archivo Compose.
      * 
      * @param projectId ID del proyecto
      * @param project   Resumen del proyecto
@@ -157,13 +158,14 @@ public class StartProjectUseCase {
         Path projectPath = Path.of(project.path());
 
         try {
-            TechnologyPlugin technologyPlugin = findPlugin(projectPath);
-
-            RunConfiguration configuration = technologyPlugin
-                    .getRunConfiguration(projectPath)
-                    .orElseThrow(() -> new ApiException(
-                            HttpStatus.UNPROCESSABLE_ENTITY,
-                            "La tecnología detectada no tiene una configuración de ejecución local: " + projectPath));
+            RunConfiguration configuration = projectRunRecipeLoader.load(projectPath)
+                    .orElseGet(() -> {
+                        TechnologyPlugin technologyPlugin = findPlugin(projectPath);
+                        return technologyPlugin.getRunConfiguration(projectPath)
+                                .orElseThrow(() -> new ApiException(
+                                        HttpStatus.UNPROCESSABLE_ENTITY,
+                                        "La tecnología detectada no tiene una configuración de ejecución local: " + projectPath));
+                    });
 
             // 1. Persistimos el Service PRIMERO — necesitamos su id antes de
             // arrancar el proceso, porque el log hub se indexa por serviceId.
@@ -174,8 +176,10 @@ public class StartProjectUseCase {
             log.info(">>> Ejecutando proyecto local {} con comando: {}", projectId, configuration.command());
 
             ProcessBuilder processBuilder = new ProcessBuilder(configuration.command())
-                    .directory(projectPath.toFile())
+                    .directory((configuration.workingDirectory() == null
+                            ? projectPath : configuration.workingDirectory()).toFile())
                     .redirectErrorStream(true);
+            processBuilder.environment().putAll(configuration.environment());
 
             Process process = processBuilder.start();
             localProcessManager.register(projectId, process);
@@ -203,6 +207,7 @@ public class StartProjectUseCase {
                     process,
                     signals,
                     configuration.port(),
+                    configuration.healthCheckUrl(),
                     startupTimeoutSeconds,
                     () -> localProcessLogHub.recentLines(savedService.getId()));
 
@@ -251,17 +256,12 @@ public class StartProjectUseCase {
     }
 
     private boolean isAnyLocalProcessStillAlive(UUID projectId) {
-
         Process process = localProcessManager.get(projectId);
-
-        if (process == null) {
-            return false;
-        }
-
-        boolean alive = process.isAlive();
+        boolean alive = localProcessManager.isAlive(projectId);
+        if (process == null) return alive;
 
         log.info(
-                ">>> Proceso local del proyecto {} | PID: {} | alive: {}",
+                ">>> Árbol de procesos local del proyecto {} | PID raíz: {} | alive: {}",
                 projectId,
                 process.pid(),
                 alive);
@@ -270,11 +270,11 @@ public class StartProjectUseCase {
     }
 
     /**
-     * Ejecuta un proyecto con docker-compose.yml
+     * Ejecuta un stack definido con Docker Compose.
      * 
      * @param projectId   ID del proyecto
      * @param project     Resumen del proyecto
-     * @param composeFile Path del docker-compose.yml
+     * @param composeFile archivo Compose del proyecto
      * @return Instancia del runtime
      */
     private RuntimeInstance executeDockerCompose(UUID projectId,
@@ -315,8 +315,18 @@ public class StartProjectUseCase {
                     dc.getLabels().get("com.docker.compose.service"));
         }
 
+        if (dockerContainers.isEmpty()) {
+            String reason = "Docker Compose no creó contenedores para este proyecto.";
+            instance.markFailed(reason);
+            eventPublisher.publishEvent(new ProjectFailedEvent(projectId, reason));
+            return runtimeInstanceRepository.save(instance);
+        }
+
+        long readinessDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS
+                .toNanos(Math.max(5, baseStartupTimeoutSeconds));
         boolean allHealthy = true;
         String failedServiceName = null;
+        String failedServiceState = null;
 
         for (com.github.dockerjava.api.model.Container dc : dockerContainers) {
             String serviceName = dc.getLabels()
@@ -335,7 +345,8 @@ public class StartProjectUseCase {
                             port));
 
             Service savedService = serviceRepository.save(service);
-            boolean healthy = waitUntilRunning(dc.getId());
+            String readiness = waitUntilReady(dc.getId(), readinessDeadline);
+            boolean healthy = readiness == null;
             savedService.updateStatus(
                     healthy
                             ? ServiceStatus.RUNNING
@@ -351,7 +362,7 @@ public class StartProjectUseCase {
                                 existingContainer.getDockerContainerId(),
                                 dc.getId());
                         existingContainer.updateDockerContainerId(dc.getId());
-                        existingContainer.updateState(dc.getState());
+                        existingContainer.updateState(healthy ? normalizeState(dc.getState()) : readiness);
                         return existingContainer;
                     })
                     .orElseGet(() -> {
@@ -364,14 +375,17 @@ public class StartProjectUseCase {
                         return new Container(
                                 savedService.getId(),
                                 dc.getId(),
-                                dc.getState());
+                                healthy ? normalizeState(dc.getState()) : readiness);
                     });
 
             containerRepository.save(container);
 
             if (!healthy) {
+                if (allHealthy) {
+                    failedServiceName = serviceName;
+                    failedServiceState = readiness;
+                }
                 allHealthy = false;
-                failedServiceName = serviceName;
             }
         }
 
@@ -379,43 +393,44 @@ public class StartProjectUseCase {
             instance.markRunning();
             eventPublisher.publishEvent(new ProjectStartedEvent(projectId));
         } else {
-            String reason = "Servicio '" +
-                            failedServiceName +
-                            "' no pasó el health check";
+            String reason = "El servicio '" + failedServiceName + "' no quedó listo (estado: "
+                    + failedServiceState + "). Revisa su healthcheck y sus logs.";
             instance.markFailed(reason);
             eventPublisher.publishEvent(new ProjectFailedEvent(projectId, reason));
         }
         return runtimeInstanceRepository.save(instance);
     }
 
-    /*
-     * Espera a que el contenedor esté corriendo.
-     * 
-     * @param dockerContainerId ID del contenedor
-     * 
-     * @return true si el contenedor está corriendo, false en caso contrario
+    /**
+     * Compose aplica el orden de {@code depends_on}; aquí se espera a que
+     * cada servicio esté corriendo y sano si declara un healthcheck.
+     * Devuelve null cuando está listo o el último estado observado.
      */
-    private boolean waitUntilRunning(String dockerContainerId) {
-        for (int attempt = 0; attempt < HEALTH_CHECK_ATTEMPTS; attempt++) {
-            if (dockerClientAdapter.isRunning(dockerContainerId)) {
-                return true;
+    private String waitUntilReady(String dockerContainerId, long deadline) {
+        String status = "starting";
+        while (System.nanoTime() < deadline) {
+            try {
+                status = dockerClientAdapter.readinessStatus(dockerContainerId);
+            } catch (RuntimeException e) {
+                log.warn("No se pudo consultar la disponibilidad del contenedor {}: {}",
+                        dockerContainerId, e.getMessage());
+                return "unavailable";
             }
-            sleep();
+            if ("running".equals(status) || "healthy".equals(status)) {
+                return null;
+            }
+            try {
+                Thread.sleep(COMPOSE_READINESS_POLL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return "interrupted";
+            }
         }
-        return false;
+        return status;
     }
 
-    /*
-     * Espera a que el contenedor esté corriendo.
-     * 
-     * @param dockerContainerId ID del contenedor
-     */
-    private void sleep() {
-        try {
-            Thread.sleep(HEALTH_CHECK_INTERVAL_MS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+    private String normalizeState(String state) {
+        return state == null || state.isBlank() ? "running" : state.toLowerCase(java.util.Locale.ROOT);
     }
 
     /**

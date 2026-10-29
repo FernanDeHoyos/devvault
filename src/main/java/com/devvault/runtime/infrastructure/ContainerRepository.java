@@ -13,5 +13,6 @@ import com.devvault.runtime.domain.ContainerKind;
  */
 public interface ContainerRepository extends JpaRepository<Container, UUID> {
     Optional<Container> findByServiceId(UUID serviceId);
+    List<Container> findByServiceIdIn(List<UUID> serviceIds);
     List<Container> findByKind(ContainerKind kind);
 }

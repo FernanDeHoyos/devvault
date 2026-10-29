@@ -1,7 +1,10 @@
 package com.devvault.runtime.application;
 
 import java.net.InetSocketAddress;
+import java.net.HttpURLConnection;
 import java.net.Socket;
+import java.net.URI;
+import java.net.URL;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -77,10 +80,17 @@ public class LocalProcessHealthProbe {
      */
     public Result awaitReady(Process process, PortSignals signals, Integer configuredPort,
             int timeoutSeconds, Supplier<List<String>> recentLines) {
+        return awaitReady(process, signals, configuredPort, null, timeoutSeconds, recentLines);
+    }
+
+    /** Waits for a declared local HTTP endpoint when the project recipe specifies one. */
+    public Result awaitReady(Process process, PortSignals signals, Integer configuredPort,
+            String healthCheckUrl, int timeoutSeconds, Supplier<List<String>> recentLines) {
 
         long deadline = System.currentTimeMillis() + Math.max(5, timeoutSeconds) * 1000L;
         List<Integer> osPorts = List.of();
         long nextOsProbeAt = 0L;
+        int lastHttpStatus = -1;
 
         while (true) {
             if (!process.isAlive()) {
@@ -90,12 +100,27 @@ public class LocalProcessHealthProbe {
             }
 
             if (System.currentTimeMillis() >= deadline) {
-                String reason = "El proceso local sigue vivo pero no abrió ningún puerto en "
+                String reason = healthCheckUrl != null
+                        ? "El endpoint de salud " + healthCheckUrl + " no respondió con HTTP 2xx en "
+                                + timeoutSeconds + "s (última respuesta: " + describeHttpStatus(lastHttpStatus) + ")."
+                        : "El proceso local sigue vivo pero no abrió ningún puerto en "
                         + timeoutSeconds + "s. Asumido: " + describe(configuredPort)
                         + "; declarado en la salida: " + describe(signals.explicitPorts())
-                        + "; en escucha según el SO: " + describe(osPorts) + "."
-                        + tail(recentLines.get());
+                        + "; en escucha según el SO: " + describe(osPorts) + ".";
+                reason += tail(recentLines.get());
                 return new Result(false, null, reason);
+            }
+
+            if (healthCheckUrl != null) {
+                lastHttpStatus = readHttpStatus(healthCheckUrl);
+                if (lastHttpStatus >= 200 && lastHttpStatus < 300) {
+                    int port = URI.create(healthCheckUrl).getPort();
+                    if (port < 0) port = 80;
+                    log.info("Health check HTTP OK en {} (status {})", healthCheckUrl, lastHttpStatus);
+                    return new Result(true, port, null);
+                }
+                sleep();
+                continue;
             }
 
             // 1. Lo que el servidor dijo explícitamente.
@@ -159,6 +184,29 @@ public class LocalProcessHealthProbe {
             log.debug("No se pudo conectar a {}:{} ({})", host, port, e.getClass().getSimpleName());
             return false;
         }
+    }
+
+    private int readHttpStatus(String healthCheckUrl) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = URI.create(healthCheckUrl).toURL();
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(CONNECT_TIMEOUT_MS);
+            connection.setInstanceFollowRedirects(false);
+            return connection.getResponseCode();
+        } catch (Exception e) {
+            log.debug("Health check HTTP pendiente en {} ({})", healthCheckUrl,
+                    e.getClass().getSimpleName());
+            return -1;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private String describeHttpStatus(int status) {
+        return status < 0 ? "sin respuesta" : Integer.toString(status);
     }
 
     private boolean isUsable(Integer port) {

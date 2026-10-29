@@ -14,7 +14,7 @@ public class SpaForwardConfiguration implements WebMvcConfigurer {
         // con el modulo: ya no hay /login, /setup ni /recover.
         for (String path : new String[] {
                 "/projects", "/projects/{id}",
-                "/workspaces", "/docker", "/logs", "/automation", "/monitoring", "/settings"
+                "/workspaces", "/docker", "/logs", "/automation", "/monitoring", "/ports", "/settings"
         }) {
             registry.addViewController(path).setViewName("forward:/index.html");
         }

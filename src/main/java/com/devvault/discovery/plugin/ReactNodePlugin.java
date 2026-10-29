@@ -1,12 +1,15 @@
 package com.devvault.discovery.plugin;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
@@ -100,14 +103,14 @@ public class ReactNodePlugin implements TechnologyPlugin {
                 return Optional.of(
                         new RunConfiguration(
                                 "app",
-                                List.of("npm.cmd", "run", "dev"),
+                                npmCommand("run", "dev"),
                                 5174));
             }
             if (scripts.has("start")) {
                 return Optional.of(
                         new RunConfiguration(
                                 "app",
-                                List.of("npm.cmd", "start"),
+                                npmCommand("start"),
                                 3000));
             }
         } catch (Exception e) {
@@ -115,6 +118,45 @@ public class ReactNodePlugin implements TechnologyPlugin {
         }
 
         return Optional.empty();
+    }
+
+    private boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    private List<String> npmCommand(String... arguments) {
+        List<String> command = new ArrayList<>();
+        if (isWindows()) {
+            if (commandAvailableOnPath("npm.cmd")) {
+                // ProcessBuilder no puede ejecutar shims .cmd directamente.
+                command.addAll(List.of("cmd.exe", "/c", "npm.cmd"));
+            } else if (commandAvailableOnPath("npm.exe")) {
+                // Algunos gestores de Node para Windows publican un shim .exe en vez de npm.cmd.
+                command.add("npm.exe");
+            } else {
+                command.addAll(List.of("cmd.exe", "/c", "npm.cmd"));
+            }
+        } else {
+            command.add("npm");
+        }
+        command.addAll(List.of(arguments));
+        return List.copyOf(command);
+    }
+
+    private boolean commandAvailableOnPath(String command) {
+        String path = System.getenv("PATH");
+        if (path == null || path.isBlank()) {
+            return false;
+        }
+        for (String directory : path.split(Pattern.quote(File.pathSeparator))) {
+            if (!directory.isBlank()) {
+                Path candidate = Path.of(directory.replace("\"", "")).resolve(command);
+                if (Files.isRegularFile(candidate)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

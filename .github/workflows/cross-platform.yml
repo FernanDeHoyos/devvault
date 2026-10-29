@@ -1,0 +1,83 @@
+name: Cross-platform checks
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout including UI submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Test backend (Linux)
+        if: runner.os == 'Linux'
+        run: ./gradlew test --no-daemon
+
+      - name: Test backend (Windows)
+        if: runner.os == 'Windows'
+        run: .\gradlew.bat test --no-daemon
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Lint and build UI
+        working-directory: ui
+        run: |
+          npm run lint
+          npm run build
+
+      - name: Build backend with embedded UI (Linux)
+        if: runner.os == 'Linux'
+        run: ./gradlew bootJar -PpreviewUiDir=ui/dist --no-daemon
+
+      - name: Build backend with embedded UI (Windows)
+        if: runner.os == 'Windows'
+        run: .\gradlew.bat bootJar -PpreviewUiDir=ui/dist --no-daemon
+
+      - name: Verify embedded UI in JAR (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: jar tf build/libs/devvault-0.0.1-SNAPSHOT.jar | grep -Fx 'BOOT-INF/classes/static/index.html'
+
+      - name: Verify embedded UI in JAR (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $entries = jar tf build/libs/devvault-0.0.1-SNAPSHOT.jar
+          if ($entries -notcontains 'BOOT-INF/classes/static/index.html') {
+            throw 'The executable JAR does not contain the compiled UI.'
+          }
+
+      - name: Smoke test integrated app (Linux)
+        if: runner.os == 'Linux'
+        run: ./scripts/smoke-test-linux.sh
+
+      - name: Smoke test integrated app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke-test-windows.ps1

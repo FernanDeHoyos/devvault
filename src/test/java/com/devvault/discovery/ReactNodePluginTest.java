@@ -1,14 +1,18 @@
 package com.devvault.discovery;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.devvault.discovery.plugin.DetectionResult;
@@ -42,7 +46,7 @@ public class ReactNodePluginTest {
         assertTrue(result.isPresent());
         assertEquals("JavaScript", result.get().language());
         assertEquals("React", result.get().framework());
-        assertEquals("18.2.0", result.get().version());
+        assertEquals("^18.2.0", result.get().version());
         
     }
 
@@ -79,6 +83,56 @@ public class ReactNodePluginTest {
         Optional<DetectionResult> result = plugin.detect(tempDir);
         // Verifica que no se detecta ningún proyecto si no hay package.json
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void shouldUsePlatformNpmCommandForDevScript(@TempDir Path tempDir) throws IOException {
+        writePackageJson(tempDir, """
+                {"scripts":{"dev":"vite"}}
+                """);
+
+        var configuration = plugin.getRunConfiguration(tempDir).orElseThrow();
+        List<String> expected = npmCommandPrefix();
+        expected.addAll(List.of("run", "dev"));
+        assertEquals(expected, configuration.command());
+    }
+
+    @Test
+    void shouldUsePlatformNpmCommandForStartScript(@TempDir Path tempDir) throws IOException {
+        writePackageJson(tempDir, """
+                {"scripts":{"start":"node server.js"}}
+                """);
+
+        var configuration = plugin.getRunConfiguration(tempDir).orElseThrow();
+        List<String> expected = npmCommandPrefix();
+        expected.add("start");
+        assertEquals(expected, configuration.command());
+    }
+
+    private List<String> npmCommandPrefix() {
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            return new ArrayList<>(List.of("npm"));
+        }
+        if (commandAvailableOnPath("npm.cmd")) {
+            return new ArrayList<>(List.of("cmd.exe", "/c", "npm.cmd"));
+        }
+        if (commandAvailableOnPath("npm.exe")) {
+            return new ArrayList<>(List.of("npm.exe"));
+        }
+        return new ArrayList<>(List.of("cmd.exe", "/c", "npm.cmd"));
+    }
+
+    private boolean commandAvailableOnPath(String command) {
+        String path = System.getenv("PATH");
+        if (path == null || path.isBlank()) {
+            return false;
+        }
+        for (String directory : path.split(Pattern.quote(File.pathSeparator))) {
+            if (!directory.isBlank() && Files.isRegularFile(Path.of(directory.replace("\"", "")).resolve(command))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void writePackageJson(Path dir, String content) throws IOException {

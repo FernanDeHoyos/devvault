@@ -9,17 +9,31 @@ Backend de **DevVault**, una aplicación local para descubrir proyectos de desar
 - Detección de proyectos Spring Boot (Maven/Gradle), Node.js/React y PHP/Laravel.
 - Catálogo estático de rutas para Spring MVC, Laravel, Express, Fastify y NestJS.
 - Inicio y detención de proyectos locales o definidos con Docker Compose.
+- Recetas `devvault.run.json` versionables para personalizar el arranque local
+  en Windows y Linux; ejemplo en `docs/devvault.run.example.json`.
+- Readiness HTTP configurable para recetas, limitado a endpoints de loopback.
+- Inventario de puertos registrados, procesos que los ocupan y conflictos locales.
 - Lectura de logs en tiempo real mediante WebSocket.
+- Vista de logs combinados para servicios activos, con búsqueda, filtros por
+  nivel y exportación de las líneas visibles.
 - Métricas y alertas de runtime, reglas de automatización y administración de plugins integrados.
 - Apertura de un proyecto en el editor instalado (VS Code, IntelliJ, Sublime, Zed), configurable con `DEVVAULT_DEFAULT_EDITOR`.
 - Resumen Git con ramas, commits, estado de cambios, relación con upstream y `fetch` manual.
 - Sin autenticación: la API va abierta en la máquina del usuario y se protege enlazando a `127.0.0.1` y rechazando peticiones con un `Origin` ajeno.
+
+El estado, las decisiones y los criterios de aceptación de las mejoras están en
+[`docs/Roadmap-DevVault.md`](docs/Roadmap-DevVault.md).
+El estado y los pasos para preparar una versión pública están en
+[`docs/Distribucion-OpenSource.md`](docs/Distribucion-OpenSource.md).
 
 ## Stack
 
 Java 17 · Spring Boot 3.4 · Spring Data JPA · PostgreSQL · Flyway · Docker Java · OSHI · WebSocket · Gradle.
 
 ## Requisitos
+
+El objetivo de soporte es Windows y Linux; la matriz automatizada usa Windows
+y Ubuntu. macOS no forma parte de la matriz ni se considera soportado por ahora.
 
 | Herramienta | Versión | Para qué |
 | --- | --- | --- |
@@ -368,6 +382,7 @@ Base path: `/api/v1`.
 | Logs | WebSocket `/projects/{id}/logs?service={serviceName}` |
 | Git | `/projects/{id}/git`, `/projects/{id}/git/fetch` |
 | Monitoring | `/projects/{id}/metrics`, `/alerts` |
+| Puertos | `/ports` |
 | Automation | `/automation/rules` |
 | Plugins integrados | `/plugins` |
 | Editor | `/editors`, `/projects/{id}/open` |
@@ -378,6 +393,9 @@ diseñados en el contrato de API pero todavía no implementados. El recuento
 completo está en [DevVault-API-Design.md](docs/DevVault-API-Design.md).
 
 ## Pruebas
+
+El proceso, matriz de pruebas y smoke test están descritos en
+[`docs/Proceso-Pruebas-Multiplataforma.md`](docs/Proceso-Pruebas-Multiplataforma.md).
 
 ```bash
 # Windows
@@ -396,3 +414,9 @@ El código se organiza por módulos funcionales bajo `src/main/java/com/devvault
 ## Alcance y seguridad
 
 DevVault está pensado para ejecutarse localmente y no lleva autenticación. La API enlaza a `127.0.0.1` por defecto y `SameOriginFilter` rechaza las peticiones con un `Origin` ajeno. Lee [Seguridad](#seguridad) para qué cubre y qué no. No expongas el backend a redes no confiables.
+
+## Licencia
+
+DevVault Backend se distribuye bajo la [Apache License 2.0](LICENSE). La
+interfaz del submódulo `ui/` también se distribuye bajo Apache-2.0; consulta
+[`ui/LICENSE`](ui/LICENSE).

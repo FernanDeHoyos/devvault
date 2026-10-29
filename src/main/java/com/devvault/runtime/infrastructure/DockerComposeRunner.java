@@ -9,20 +9,32 @@ package com.devvault.runtime.infrastructure;
 
 import org.springframework.stereotype.Component;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import java.util.concurrent.TimeoutException;
 
 @Component
 public class DockerComposeRunner {
 
-    private static final Duration TIMEOUT = Duration.ofMinutes(3);
+    private static final Duration TIMEOUT = Duration.ofMinutes(10);
+    private static final List<String> COMPOSE_FILENAMES = List.of(
+            "compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml");
+
+    /** Encuentra el nombre de archivo Compose preferido por la especificación actual. */
+    public Optional<Path> findComposeFile(Path projectDirectory) {
+        return COMPOSE_FILENAMES.stream()
+                .map(projectDirectory::resolve)
+                .filter(java.nio.file.Files::isRegularFile)
+                .findFirst();
+    }
 
     public record ProcessResult(int exitCode, String output) {
         public boolean isSuccess() {
@@ -58,28 +70,61 @@ public class DockerComposeRunner {
                 "docker", "compose", "-p", projectName, "-f", composeFile.toString()));
         command.addAll(List.of(composeArgs));
 
+        Process process = null;
         try {
-            Process process = new ProcessBuilder(command)
+            process = new ProcessBuilder(command)
                     .redirectErrorStream(true)
                     .start();
+            Process startedProcess = process;
+            CompletableFuture<String> output = CompletableFuture.supplyAsync(
+                    () -> readOutput(startedProcess.getInputStream()));
 
-            String output;
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                output = reader.lines().collect(Collectors.joining("\n"));
-            }
-
-            boolean finished = process.waitFor(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+            boolean finished = process.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             if (!finished) {
-                process.destroyForcibly();
-                return new ProcessResult(-1, "Timeout esperando 'docker compose " + composeArgs[0] + "'");
+                terminateTree(process);
+                return new ProcessResult(-1, "Timeout esperando 'docker compose " + composeArgs[0] + "'.\n"
+                        + awaitOutput(output));
             }
 
-            return new ProcessResult(process.exitValue(), output);
+            return new ProcessResult(process.exitValue(), awaitOutput(output));
 
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
+            return new ProcessResult(-1, "Error ejecutando docker compose: " + e.getMessage());
+        } catch (InterruptedException e) {
+            if (process != null) {
+                terminateTree(process);
+            }
             Thread.currentThread().interrupt();
             return new ProcessResult(-1, "Error ejecutando docker compose: " + e.getMessage());
+        }
+    }
+
+    private String readOutput(InputStream input) {
+        try (input) {
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return "No se pudo leer la salida de Docker Compose: " + e.getMessage();
+        }
+    }
+
+    private String awaitOutput(CompletableFuture<String> output) {
+        try {
+            return output.get(2, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "Lectura de salida interrumpida.";
+        } catch (ExecutionException | TimeoutException e) {
+            return "La salida de Docker Compose no terminó de recibirse.";
+        }
+    }
+
+    private void terminateTree(Process process) {
+        process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+        try {
+            process.waitFor(2, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }

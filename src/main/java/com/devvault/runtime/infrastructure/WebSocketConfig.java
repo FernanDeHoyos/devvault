@@ -20,6 +20,6 @@ public class WebSocketConfig implements WebSocketConfigurer {
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         // El patrón coincide con /api/v1/projects/{cualquier-uuid}/logs
         registry.addHandler(logWebSocketHandler, "/api/v1/projects/*/logs")
-                .setAllowedOrigins("http://localhost:5050", "http://127.0.0.1:5050");
+                .setAllowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*");
     }
 }

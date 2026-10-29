@@ -67,15 +67,23 @@ public class DockerClientAdapter {
                 .exec();
     }
 
-    /**
-     * Verifica si un contenedor está corriendo.
-     * 
-     * @param dockerContainerId ID del contenedor
-     * @return true si el contenedor está corriendo, false en otro caso
-     */
+    /** Verifica si el contenedor está corriendo (usado también por Monitoring). */
     public boolean isRunning(String dockerContainerId) {
-        var inspect = dockerClient.inspectContainerCmd(dockerContainerId).exec();
-        return Boolean.TRUE.equals(inspect.getState().getRunning());
+        var state = dockerClient.inspectContainerCmd(dockerContainerId).exec().getState();
+        return Boolean.TRUE.equals(state.getRunning());
+    }
+
+    /** Devuelve el estado de disponibilidad, incluyendo el healthcheck configurado. */
+    public String readinessStatus(String dockerContainerId) {
+        var state = dockerClient.inspectContainerCmd(dockerContainerId).exec().getState();
+        if (!Boolean.TRUE.equals(state.getRunning())) {
+            return state.getStatus() == null ? "stopped" : state.getStatus().toLowerCase(java.util.Locale.ROOT);
+        }
+        var health = state.getHealth();
+        if (health == null || health.getStatus() == null || health.getStatus().isBlank()) {
+            return "running";
+        }
+        return health.getStatus().toLowerCase(java.util.Locale.ROOT);
     }
 
     /** Obtiene una muestra puntual, equivalente a `docker stats --no-stream`. */

@@ -350,6 +350,48 @@ Muestra CPU/RAM de los runtimes del proyecto: contenedores Docker y procesos loc
 ```
 `cpuPercent` puede ser `null` si el sistema operativo no entrega datos válidos en ambas muestras. `memMb` representa memoria residente agregada del runtime; puede haber pequeñas diferencias entre sistemas operativos.
 
+### `GET /ports`
+
+Devuelve los puertos que reclaman los servicios registrados por DevVault y
+consulta una vez los listeners TCP del sistema operativo. En Windows usa
+`netstat -ano -p tcp`; en Linux usa `lsof` y recurre a `ss` si `lsof` no está
+disponible. No explora ni termina procesos que no hayan sido iniciados por
+DevVault.
+
+**Response `200`:**
+
+```json
+{
+  "listenerScanAvailable": true,
+  "scannedAt": "2026-10-29T16:30:00Z",
+  "ports": [{
+    "port": 5174,
+    "status": "LISTENING",
+    "conflict": false,
+    "conflictReason": null,
+    "services": [{
+      "serviceId": "uuid",
+      "serviceName": "app",
+      "projectId": "uuid",
+      "projectName": "mi-proyecto",
+      "serviceStatus": "RUNNING",
+      "runtimeKind": "LOCAL_PROCESS"
+    }],
+    "listeners": [{ "pid": 1234, "processName": "node.exe" }],
+    "canOpen": true,
+    "url": "http://localhost:5174"
+  }]
+}
+```
+
+`status` puede ser `LISTENING`, `AVAILABLE`, `CONFLICT` o `UNKNOWN`. Se marca
+conflicto si varios servicios activos declaran el mismo puerto, si un listener
+permanece sin un servicio activo registrado o si un servicio figura activo pero
+el SO no encuentra listener. `canOpen` solo es verdadero cuando el escaneo está
+disponible, un único servicio está activo en el puerto y se ve un listener.
+`UNKNOWN` significa que no se pudo ejecutar la utilidad de inspección; nunca se
+interpreta como puerto libre.
+
 ### `GET /alerts`
 Alertas activas o resueltas, persistidas a partir de `ProjectFailedEvent`. Los fallos de arranque de Docker y procesos locales generan el mismo tipo de alerta (`PROJECT_FAILED`).
 **Query params:** `status` (`ACTIVE|RESOLVED`), `projectId`
@@ -465,6 +507,7 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 | PATCH | `/automation/rules/{id}` | Automation | — |
 | DELETE | `/automation/rules/{id}` | Automation | — |
 | GET | `/projects/{id}/metrics` | Monitoring | CU-13 |
+| GET | `/ports` | Puertos | — |
 | GET | `/alerts` | Monitoring | CU-13 |
 | PATCH | `/alerts/{id}` | Monitoring | — |
 | GET | `/plugins` | Plugin | — |
@@ -473,9 +516,9 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 | POST | `/projects/{id}/open` | Editor | — |
 | GET | `/health` | Salud | — |
 
-**Total: 41 endpoints** en el contrato. **32 están implementados** (31 REST + 1 WebSocket) y 9 están diseñados pero pendientes de v1.0: Resource (6), Environment (2) y `POST /projects/{id}/restart`, marcados con *(v1.0)*.
+**Total: 42 endpoints** en el contrato. **33 están implementados** (32 REST + 1 WebSocket) y 9 están diseñados pero pendientes de v1.0: Resource (6), Environment (2) y `POST /projects/{id}/restart`, marcados con *(v1.0)*.
 
-> Las cifras están comprobadas contra el código, no estimadas: 38 secciones de
+> Las cifras están comprobadas contra el código, no estimadas: 39 secciones de
 > endpoint + WebSocket + `GET /health` + `GET /runtime/active`. Los dos últimos
 > los implementaba el código desde antes de que esta tabla los recogiera, y
 > `restart` figuraba aquí sin existir en ningún sitio: la UI reinicia encadenando

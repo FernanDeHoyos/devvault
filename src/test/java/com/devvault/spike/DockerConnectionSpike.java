@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Disabled;
 import org.testcontainers.shaded.com.github.dockerjava.core.DefaultDockerClientConfig;
 import org.testcontainers.shaded.com.github.dockerjava.core.DockerClientConfig;
 import org.testcontainers.shaded.com.github.dockerjava.core.DockerClientImpl;
@@ -24,6 +25,7 @@ import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
  * HealthCheckService, etc. encima con confianza.
  */
 
+@Disabled("Prueba manual de diagnóstico: enumera los contenedores del daemon Docker del desarrollador.")
 class DockerConnectionSpike {
     @Test 
     void deberiaConectarseADockerYListarContenedores() {
