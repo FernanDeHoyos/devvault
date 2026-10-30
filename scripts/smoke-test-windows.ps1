@@ -89,7 +89,8 @@ function Wait-Backend([System.Diagnostics.Process]$BackendProcess) {
             Start-Sleep -Seconds 1
         }
     }
-    throw "El backend no respondió a tiempo. Registros: $stdoutLog y $stderrLog"
+    $dockerOutput = & docker @dockerArguments 2>&1
+if ($LASTEXITCODE -ne 0) { throw "No se pudo iniciar PostgreSQL temporal con Docker: $dockerOutput" }
 }
 
 try {
@@ -110,8 +111,8 @@ try {
             "--env", "POSTGRES_PASSWORD=devvault_dev",
             "postgres:16-alpine"
         )
-        $dockerOutput = & docker @dockerArguments 2>&1
-if ($LASTEXITCODE -ne 0) { throw "No se pudo iniciar PostgreSQL temporal con Docker: $dockerOutput" }
+        & docker @dockerArguments *> $null
+        if ($LASTEXITCODE -ne 0) { throw "No se pudo iniciar PostgreSQL temporal con Docker." }
         $env:DEVVAULT_DB_URL = "jdbc:postgresql://127.0.0.1:$databasePort/devvault"
         $env:DEVVAULT_DB_USERNAME = "devvault"
         $env:DEVVAULT_DB_PASSWORD = "devvault_dev"
