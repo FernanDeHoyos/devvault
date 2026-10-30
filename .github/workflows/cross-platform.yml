@@ -77,9 +77,23 @@ jobs:
         if: runner.os == 'Linux'
         run: ./scripts/smoke-test-linux.sh
 
+      - name: Install and start PostgreSQL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install postgresql16 --params '/Password:devvault_dev' --no-progress -y
+          $pgBin = 'C:\Program Files\PostgreSQL\16\bin'
+          $env:PGPASSWORD = 'devvault_dev'
+          & "$pgBin\psql.exe" -U postgres -h 127.0.0.1 -c "CREATE USER devvault WITH PASSWORD 'devvault_dev' SUPERUSER;"
+          & "$pgBin\psql.exe" -U postgres -h 127.0.0.1 -c "CREATE DATABASE devvault OWNER devvault;"
+
       - name: Smoke test integrated app (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          DEVVAULT_DB_URL: jdbc:postgresql://127.0.0.1:5432/devvault
+          DEVVAULT_DB_USERNAME: devvault
+          DEVVAULT_DB_PASSWORD: devvault_dev
         run: ./scripts/smoke-test-windows.ps1
 
       - name: Package preview (Linux)
