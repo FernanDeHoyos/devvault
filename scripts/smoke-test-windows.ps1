@@ -15,18 +15,25 @@ if ($portOwner) {
 }
 
 # --- VALIDACIÓN DE DOCKER ---
-# Si Docker no está instalado o no está corriendo, sale limpiamente con éxito (exit 0)
-# para evitar que falle el pipeline en GitHub Actions (windows-latest).
-$dockerCommand = Get-Command "docker" -ErrorAction SilentlyContinue
-if (-not $dockerCommand) {
-    Write-Host "⚠️ Docker no está disponible en este entorno. Omitiendo smoke test de PostgreSQL." -ForegroundColor Yellow
+# Comprobamos si el comando docker existe Y si el motor de Docker está corriendo activamente
+$dockerAvailable = $false
+try {
+    if (Get-Command "docker" -ErrorAction SilentlyContinue) {
+        # 'docker info' devuelve código 0 solo si el demonio está activo
+        docker info *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $dockerAvailable = $true
+        }
+    }
+} catch {
+    $dockerAvailable = $false
+}
+
+if (-not $dockerAvailable) {
+    Write-Host "⚠️ Docker no está disponible o el servicio no está activo en este entorno. Omitiendo smoke test de PostgreSQL." -ForegroundColor Yellow
     exit 0
 }
-& docker info *> $null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "⚠️ Docker no está disponible en este entorno. Omitiendo smoke test de PostgreSQL." -ForegroundColor Yellow
-    exit 0
-}
+# ----------------------------
 
 $nodePortOwner = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($nodePortOwner) {
