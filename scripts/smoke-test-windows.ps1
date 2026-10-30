@@ -29,7 +29,10 @@ try {
     $dockerAvailable = $false
 }
 
-if (-not $dockerAvailable) {
+# Docker solo hace falta para levantar el PostgreSQL temporal. Si el workflow
+# ya aprovisionó una base y la pasa por DEVVAULT_DB_URL, exigir Docker aquí
+# haría que el smoke test se omitiera justo en el caso en que sí puede correr.
+if (-not $dockerAvailable -and -not $env:DEVVAULT_DB_URL) {
     Write-Host "⚠️ Docker no está disponible o el servicio no está activo en este entorno. Omitiendo smoke test de PostgreSQL." -ForegroundColor Yellow
     exit 0
 }
@@ -131,6 +134,11 @@ try {
     }
 
     New-Item -ItemType Directory -Path $workspacePath | Out-Null
+    # El backend guarda la ruta resuelta con Path.toRealPath(), que en Windows
+    # expande los nombres 8.3. En el runner TEMP es C:\Users\RUNNER~1\... y la
+    # API responde C:\Users\runneradmin\..., así que sin normalizar aquí las
+    # comparaciones exactas de ruta fallan por la forma y no por un defecto.
+    $workspacePath = (Get-Item -LiteralPath $workspacePath).FullName
     $nodeProjectPath = Join-Path $workspacePath "node-project"
     New-Item -ItemType Directory -Path $nodeProjectPath | Out-Null
     $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
