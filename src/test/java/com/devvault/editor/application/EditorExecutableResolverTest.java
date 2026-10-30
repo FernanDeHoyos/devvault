@@ -19,8 +19,10 @@ import org.junit.jupiter.api.io.TempDir;
  * real del módulo: candidatos con variables de entorno, con comodines y con
  * extensiones de Windows.
  *
- * <p>No se prueba el arranque de un editor real porque eso abriría una ventana en
- * la máquina de quien ejecuta la suite. Lo que se prueba es exactamente la parte
+ * <p>
+ * No se prueba el arranque de un editor real porque eso abriría una ventana en
+ * la máquina de quien ejecuta la suite. Lo que se prueba es exactamente la
+ * parte
  * que puede fallar en silencio.
  */
 class EditorExecutableResolverTest {
@@ -127,7 +129,8 @@ class EditorExecutableResolverTest {
         Optional<Path> resolved = resolver.resolve(pattern);
 
         assertTrue(resolved.isPresent(), "debería resolver el patrón con comodín");
-        assertEquals(newExe.toAbsolutePath(), resolved.get(), "debe ganar la carpeta más reciente");
+        // Compara las rutas normalizadas y resueltas de forma absoluta
+        assertEquals(newExe.toRealPath(), resolved.get().toRealPath(), "debe ganar la carpeta más reciente");
     }
 
     @Test
