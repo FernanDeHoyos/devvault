@@ -112,15 +112,24 @@ class EditorExecutableResolverTest {
 
         Path oldDir = Files.createDirectory(root.resolve("IDEA 2023.1"));
         Files.createDirectories(oldDir.resolve("bin"));
-        Path oldExe = Files.createFile(oldDir.resolve("bin").resolve("idea64.exe"));
+        Files.createFile(oldDir.resolve("bin").resolve("idea64.exe"));
 
         Path newDir = Files.createDirectory(root.resolve("IDEA 2024.2"));
         Files.createDirectories(newDir.resolve("bin"));
         Path newExe = Files.createFile(newDir.resolve("bin").resolve("idea64.exe"));
 
+        // El resolutor elige la carpeta más reciente, no el archivo: compara el
+        // mtime del directorio que casa con el comodín. Por eso la fecha se fija
+        // aquí en las carpetas.
+        //
+        // Ponerla en los .exe, como estaba antes, no influía en la decisión. En
+        // Windows el test pasaba por casualidad: crear un hijo actualiza el mtime
+        // del directorio, y el orden de creación dejaba nueva a la carpeta de
+        // 2024.2. En Linux (overlayfs) ambos directorios acababan con la misma
+        // marca y el desempate de Stream.max devolvía cualquiera de los dos.
         long now = System.currentTimeMillis();
-        Files.setLastModifiedTime(newExe, FileTime.fromMillis(now));
-        Files.setLastModifiedTime(oldExe, FileTime.fromMillis(now - 10_000_000L));
+        Files.setLastModifiedTime(newDir, FileTime.fromMillis(now));
+        Files.setLastModifiedTime(oldDir, FileTime.fromMillis(now - 10_000_000L));
 
         // El patrón se arma como texto y no con Path.resolve porque '*' es un
         // carácter ilegal en una ruta de Windows.

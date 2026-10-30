@@ -105,17 +105,20 @@ public class WorkspaceService {
         .normalize();
 
         if(!Files.exists(path)){
-            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "The specified path does not exist." + path);
+            // El separador antes de la ruta no es cosmética: sin él el mensaje
+            // queda "...does not exist.C:\..." y la UI lo muestra tal cual en el
+            // aviso de error.
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "The specified path does not exist: " + path);
         }
 
         if(!Files.isDirectory(path)){
-            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "The specified path is not a directory." + path);
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "The specified path is not a directory: " + path);
         }
 
         try {
             return path.toRealPath().toString();
         } catch (IOException e) {
-            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "Error occurred while normalizing the path." + path);
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "Error occurred while normalizing the path: " + path);
         }
        
     }

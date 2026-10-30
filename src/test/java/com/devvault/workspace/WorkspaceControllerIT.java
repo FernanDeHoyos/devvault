@@ -20,6 +20,7 @@ import com.devvault.workspace.application.dto.CreatedWorkspaceRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -92,7 +93,11 @@ class WorkspaceControllerIT {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.message").value("The specified path does not exist."));
+                // Se comprueba solo el prefijo: el mensaje termina con la ruta
+                // absoluta, que cambia en cada ejecución y en cada sistema
+                // operativo. Comparar el texto completo obligaba a conocer de
+                // antemano el directorio temporal del runner.
+                .andExpect(jsonPath("$.message", startsWith("The specified path does not exist:")));
     }
 
 
@@ -118,7 +123,11 @@ class WorkspaceControllerIT {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.message").value("A workspace with the specified path already exists."));
+                // Igual que arriba: el mensaje lleva la ruta concatenada, así que
+                // se fija el prefijo estable y no el texto completo. El test
+                // esperaba "A workspace with the specified path already exists.",
+                // un mensaje que el código nunca produjo.
+                .andExpect(jsonPath("$.message", startsWith("Path is already used by another workspace:")));
     }
 
 
