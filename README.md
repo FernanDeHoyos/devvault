@@ -25,6 +25,8 @@ El estado, las decisiones y los criterios de aceptación de las mejoras están e
 [`docs/Roadmap-DevVault.md`](docs/Roadmap-DevVault.md).
 El estado y los pasos para preparar una versión pública están en
 [`docs/Distribucion-OpenSource.md`](docs/Distribucion-OpenSource.md).
+La guía para empezar a usar la aplicación está en
+[`docs/GUIA-USUARIO.md`](docs/GUIA-USUARIO.md).
 Las pautas para contribuir y reportar vulnerabilidades están en
 [`CONTRIBUTING.md`](CONTRIBUTING.md) y [`SECURITY.md`](SECURITY.md).
 
