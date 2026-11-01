@@ -10,39 +10,45 @@ fuera del primer lanzamiento.
 |---|---|---|
 | Licencia del código propio | Backend y UI declaran Apache-2.0; el submódulo está fijado al commit `da0da430edd095acc0a0f19d0917c603e22ef6dc` | Confirmar titularidad/derechos de todos los archivos antes de publicar |
 | CI | Run [40998188349](https://github.com/FernanDeHoyos/devvault/actions/runs/40998188349), commit `5268fae596326bcb28cbf2b768506b834c22b82f`: Windows y Ubuntu en verde; smoke tests y empaquetado completados | Repetir después de cualquier cambio de distribución |
-| Paquetes Windows y Linux | Se descargaron los artefactos de CI y ambos checksums internos coinciden. Windows se extrajo y su runtime reporta Java 17.0.20.1; Linux se extrajo en WSL | El arranque integral no se pudo validar: el contenedor aislado falló al retirar su capa `overlay2` por un filesystem de solo lectura; el runtime Linux tampoco pudo leer `libpthread.so.0` en WSL |
-| Dependencias | El lockfile de UI declara MIT/ISC. El runtime Java incluye dependencias bajo Apache-2.0, MIT, LGPL, EPL, EDL y GPL-2.0 con Classpath Exception | Falta una revisión completa de avisos y obligaciones de redistribución, especialmente las dependencias con copyleft; los empaquetadores solo añaden `LICENSE` |
+| Paquetes Windows y Linux | El usuario confirmó que probó DevVault en máquinas limpias y funciona | Conservar el resultado de la verificación de ambos sistemas; confirmar que los paquetes se descargaron del mismo commit que se publicará |
+| Dependencias | El empaquetador Windows genera un reporte Java, lista exacta de JARs, SBOM CycloneDX de dependencias npm de producción y copia los textos de licencia disponibles | Paquete Windows validado localmente; falta validar el empaquetador Linux en CI y revisar con especialista LGPL/EPL/GPL con Classpath Exception y entradas sin texto incluido |
 | Instalación | README ahora incluye descarga de Releases, verificación SHA-256, inicio/cierre y requisitos | Verificar los comandos contra paquetes finales y actualizar cualquier diferencia |
 | Contribuciones y seguridad | Añadidos `CONTRIBUTING.md` y `SECURITY.md` | Habilitar y comprobar en la configuración de GitHub el reporte privado de vulnerabilidades |
 | Releases | El workflow publica al subir un tag `v*` si pasan ambos jobs de plataforma | No crear el tag hasta cerrar los pendientes anteriores; no hay tags de release todavía |
 
 ## Resultado de la revisión previa al lanzamiento
 
-La última corrida verde confirma build, pruebas y generación de paquetes. Los
-checksums de los artefactos descargados también coinciden; sin embargo, el
-arranque desde una instalación limpia sigue sin verificarse debido a errores
-del entorno Docker/WSL, no a un fallo confirmado del código. El intento dejó
-detenido un contenedor de prueba aislado (`devvault-cleanverify-win-5268`), pero
-Docker no pudo retirarlo porque su filesystem de overlay informó solo lectura.
-No se reinició Docker para evitar afectar otros contenedores o datos del equipo.
+El usuario confirmó que DevVault funciona en máquinas limpias. La inspección
+anterior de los artefactos de CI también confirmó que los checksums descargados
+coincidían. El intento local de instalación no fue concluyente por errores de
+Docker/WSL, pero ya no es el bloqueo informado para las pruebas en máquinas
+limpias. Para el release, hay que asegurarse de validar los artefactos
+generados desde el commit/tag que se va a publicar.
 
-La revisión de dependencias encontró componentes Java con licencias distintas
-de Apache-2.0, incluidas LGPL y EPL; no se debe asumir que la licencia del
-código propio cubre esos componentes. Los paquetes actuales incluyen `LICENSE`
-y avisos dispersos dentro de algunos JAR/runtime, pero no un aviso consolidado
-de terceros. Hay que documentar las dependencias y evaluar sus obligaciones de
-distribución antes de hacer público un release.
+La revisión preliminar de dependencias encontró componentes Java con licencias
+distintas de Apache-2.0, incluidas LGPL y EPL; no se debe asumir que la licencia
+del código propio cubre esos componentes. Se añadió
+[`docs/THIRD-PARTY-NOTICES.md`](./THIRD-PARTY-NOTICES.md) y el empaquetado ahora
+incluye el reporte de dependencias Java, un SBOM CycloneDX de la UI y los
+textos de licencia/aviso presentes en los componentes. Este material es un
+paquete técnico para revisión especializada, no es una autorización legal para
+redistribuir. Hay que resolver las licencias desconocidas o sin texto incluido
+y validar las obligaciones aplicables antes de hacer público un release.
+La preview local `build/distribution/DevVault-0.4.0-license-review-windows-x64.zip`
+incluye el inventario Java (85 JARs empaquetados; 113 textos de licencia/aviso
+extraídos), el SBOM UI (10 dependencias de producción y sus textos) y pasó el
+empaquetado Windows. Se ejecutaron también las pruebas Gradle. Es un artefacto
+para iniciar la revisión, no el release final: hay que regenerarlo desde el
+commit que se someta a aprobación y completar CI en Linux.
 
 ## Orden recomendado para la primera beta
 
 1. Revisar titularidad de los archivos propios y publicar los cambios
    pendientes en backend y UI.
-2. Completar la auditoría de licencias de cada dependencia distribuida,
-   documentar atribuciones y avisos, e incluirlos en ambos paquetes. Revisar
-   en particular los términos LGPL/EPL y el runtime Java incluido.
-3. Instalar los ZIP y `.tar.gz` descargados en sistemas limpios, comprobar
-   inicio, health endpoint, UI, cierre y persistencia de PostgreSQL, y validar
-   los checksums.
+2. Ejecutar el empaquetado, entregar al especialista los inventarios y textos
+   de ambos paquetes, resolver cada observación y documentar su aprobación.
+3. Confirmar que las pruebas en máquinas limpias corresponden a los paquetes
+   finales de Windows y Linux y que se validaron inicio, cierre y checksum.
 4. Confirmar los requisitos y limitaciones de Windows/Linux en el README y en
    los archivos `LEEME.txt` de los paquetes.
 5. Habilitar y probar los reportes privados de vulnerabilidades en la
@@ -61,6 +67,8 @@ distribución antes de hacer público un release.
 - Las obligaciones de licencias recíprocas y el runtime Java redistribuido se
   han revisado.
 - Los reportes privados de vulnerabilidades están habilitados y probados.
+- El especialista ha revisado los inventarios/avisos correspondientes a los
+  paquetes exactos del tag y ha cerrado las observaciones legales.
 - El README advierte que DevVault es local, no tiene autenticación y no debe
   exponerse a redes no confiables.
 - La versión y sus archivos descargables corresponden al mismo tag y commit.
@@ -94,3 +102,19 @@ distribución antes de hacer público un release.
   MIT, LGPL, EPL, EDL y GPL-2.0 con Classpath Exception. Los paquetes del CI no
   contienen un aviso consolidado de terceros; la revisión y documentación de
   obligaciones sigue siendo un bloqueo para publicar.
+
+### 2026-11-01
+
+- El usuario confirmó que probó DevVault en máquinas limpias y funciona.
+- La validación queda pendiente de enlazar al commit exacto del release; la
+  auditoría de licencias y los avisos consolidados siguen siendo bloqueos.
+
+### 2026-11-01 - Inventario técnico
+
+- Se añadió un borrador de avisos para el especialista, el reporte de
+  dependencias Java de `runtimeClasspath`, un SBOM CycloneDX de las dependencias
+  npm de producción y la recopilación de textos de licencia disponibles.
+- Ambos empaquetadores ahora incluirán esos informes y textos en
+  `third-party-notices/`. Falta ejecutar CI y revisar sus paquetes exactos.
+- No es una aprobación legal: las obligaciones de redistribución y cada
+  licencia no resuelta requieren revisión especializada.

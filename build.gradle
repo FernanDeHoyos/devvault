@@ -1,7 +1,12 @@
+import com.github.jk1.license.render.CsvReportRenderer
+import com.github.jk1.license.render.SimpleHtmlReportRenderer
+import com.github.jk1.license.render.XmlReportRenderer
+
 plugins {
 	id 'java'
 	id 'org.springframework.boot' version '3.4.0'
 	id 'io.spring.dependency-management' version '1.1.7'
+	id 'com.github.jk1.dependency-license-report' version '3.1.5'
 }
 
 group = 'com.devvault'
@@ -15,6 +20,17 @@ java {
 
 repositories {
 	mavenCentral()
+}
+
+licenseReport {
+	configurations = ['runtimeClasspath']
+	unionParentPomLicenses = true
+	excludeBoms = true
+	renderers = [
+		new SimpleHtmlReportRenderer('java-dependencies.html'),
+		new CsvReportRenderer('java-dependencies.csv'),
+		new XmlReportRenderer('java-dependencies.xml', 'DevVault Java Runtime Dependencies')
+	]
 }
 
 dependencies {
@@ -60,6 +76,72 @@ tasks.named('processResources') {
 	if (previewUiDir.isPresent()) {
 		from(file(previewUiDir.get())) {
 			into 'static'
+		}
+	}
+}
+
+tasks.register('extractRuntimeDependencyLicenses') {
+	dependsOn tasks.named('generateLicenseReport')
+	dependsOn tasks.named('bootJar')
+
+	def extractedLicenses = layout.buildDirectory.dir('reports/dependency-license/java')
+	def statusFile = layout.buildDirectory.file('reports/dependency-license/java-license-file-status.txt')
+	def packagedJarList = layout.buildDirectory.file('reports/dependency-license/java-packaged-jars.txt')
+	outputs.dir(extractedLicenses)
+	outputs.file(statusFile)
+	outputs.file(packagedJarList)
+
+	doLast {
+		def bootJarFile = tasks.named('bootJar').get().archiveFile.get().asFile
+		def outputRoot = extractedLicenses.get().asFile
+		if (outputRoot.exists()) {
+			outputRoot.deleteDir()
+		}
+		outputRoot.mkdirs()
+
+		def status = []
+		def packagedJars = []
+		def licensePathPattern = ~/(?i)(?:.*\/)?(license|notice|copying)(\.(txt|md|html|rtf))?$/
+		new java.util.zip.ZipFile(bootJarFile).withCloseable { applicationJar ->
+			applicationJar.entries().each { applicationEntry ->
+				if (!applicationEntry.directory &&
+					applicationEntry.name.startsWith('BOOT-INF/lib/') &&
+					applicationEntry.name.endsWith('.jar')) {
+					packagedJars << new File(applicationEntry.name).name
+					def nestedBytes = new java.io.ByteArrayOutputStream()
+					applicationJar.getInputStream(applicationEntry).withCloseable { input ->
+						nestedBytes << input
+					}
+
+					def copied = []
+					new java.util.zip.ZipInputStream(
+						new java.io.ByteArrayInputStream(nestedBytes.toByteArray())
+					).withCloseable { nestedJar ->
+						java.util.zip.ZipEntry nestedEntry
+						while ((nestedEntry = nestedJar.nextEntry) != null) {
+							if (!nestedEntry.directory && nestedEntry.name ==~ licensePathPattern) {
+								def destination = new File(
+									outputRoot,
+									"${new File(applicationEntry.name).name}/${nestedEntry.name}"
+								)
+								destination.parentFile.mkdirs()
+								destination.withOutputStream { output -> output << nestedJar }
+								copied << nestedEntry.name
+							}
+						}
+					}
+					status << "${new File(applicationEntry.name).name}: " +
+						(copied ? "copied ${copied.join(', ')}" :
+							'no embedded license/notice text; see java-dependencies.csv')
+				}
+			}
+		}
+
+		statusFile.get().asFile.withWriter('UTF-8') { writer ->
+			status.each { writer.writeLine(it) }
+		}
+		packagedJarList.get().asFile.withWriter('UTF-8') { writer ->
+			packagedJars.sort().each { writer.writeLine(it) }
 		}
 	}
 }

@@ -106,8 +106,13 @@ if ($SkipUiBuild) {
 Write-Host "2/4 Generando el backend con la UI integrada..."
 Push-Location $backendRoot
 try {
-    if ((Invoke-NativeCommand -FilePath $gradle -Arguments @("bootJar", "-PpreviewUiDir=$uiBuildDir", "--console=plain")) -ne 0) {
-        throw "Falló la generación del JAR."
+    if ((Invoke-NativeCommand -FilePath $gradle -Arguments @(
+            "extractRuntimeDependencyLicenses",
+            "-PpreviewUiDir=$uiBuildDir",
+            "--no-daemon",
+            "--console=plain"
+        )) -ne 0) {
+        throw "Falló la generación del JAR o del inventario de licencias Java."
     }
 } finally {
     Pop-Location
@@ -138,6 +143,43 @@ Copy-Item (Join-Path $PSScriptRoot "Iniciar-DevVault.bat") $stageRoot
 Copy-Item (Join-Path $PSScriptRoot "Detener-DevVault.bat") $stageRoot
 Copy-Item (Join-Path $PSScriptRoot "LEEME.txt") $stageRoot
 Copy-Item (Join-Path $backendRoot "LICENSE") $stageRoot
+
+$noticeRoot = Join-Path $stageRoot "third-party-notices"
+New-Item -ItemType Directory -Force -Path $noticeRoot | Out-Null
+Copy-Item (Join-Path $backendRoot "docs\THIRD-PARTY-NOTICES.md") $noticeRoot
+Copy-Item (Join-Path $backendRoot "build\reports\dependency-license\java-dependencies.*") $noticeRoot
+Copy-Item (Join-Path $backendRoot "build\reports\dependency-license\java-license-file-status.txt"), (Join-Path $backendRoot "build\reports\dependency-license\java-packaged-jars.txt") $noticeRoot
+Copy-Item (Join-Path $backendRoot "build\reports\dependency-license\java") $noticeRoot -Recurse
+if ((Invoke-NativeCommand -FilePath (Get-Command node -ErrorAction Stop).Source -Arguments @(
+        (Join-Path $backendRoot "scripts\collect-ui-license-files.mjs"),
+        $uiRoot,
+        $noticeRoot
+    )) -ne 0) {
+    throw "Falló la recopilación de licencias de dependencias de la UI."
+}
+foreach ($requiredNotice in @(
+        "THIRD-PARTY-NOTICES.md",
+        "java-dependencies.csv",
+        "java-dependencies.html",
+        "java-dependencies.xml",
+        "java-license-file-status.txt",
+        "java-packaged-jars.txt",
+        "ui-sbom.cdx.json",
+        "ui-license-file-status.txt"
+    )) {
+    if (-not (Test-Path (Join-Path $noticeRoot $requiredNotice))) {
+        throw "Falta el documento de terceros requerido: $requiredNotice"
+    }
+}
+$listedJavaJars = @(Get-Content (Join-Path $noticeRoot "java-packaged-jars.txt") | Where-Object { $_.Trim() })
+$embeddedJavaJars = @(jar tf $jarFile.FullName | Where-Object { $_ -match '^BOOT-INF/lib/[^/]+\.jar$' } | ForEach-Object { Split-Path $_ -Leaf })
+if ($listedJavaJars.Count -eq 0 -or (Compare-Object ($listedJavaJars | Sort-Object) ($embeddedJavaJars | Sort-Object))) {
+    throw "La lista de dependencias Java no coincide con los JAR incluidos en el backend."
+}
+if ((Get-ChildItem (Join-Path $noticeRoot "java") -Recurse -File | Measure-Object).Count -eq 0 -or
+    (Get-ChildItem (Join-Path $noticeRoot "ui") -Recurse -File | Measure-Object).Count -eq 0) {
+    throw "No se recopilaron textos de licencia de las dependencias Java y UI."
+}
 
 Write-Host "4/4 Comprimiendo el paquete..."
 if (Test-Path $archive) { Remove-Item -LiteralPath $archive -Force }

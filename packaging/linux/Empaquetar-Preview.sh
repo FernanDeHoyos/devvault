@@ -13,6 +13,7 @@ stage_root="$distribution_root/DevVault-$version-linux-$(uname -m)"
 archive="$distribution_root/DevVault-$version-linux-$(uname -m).tar.gz"
 
 command -v npm >/dev/null 2>&1 || { echo "Se necesita Node.js y npm para compilar la UI." >&2; exit 1; }
+command -v node >/dev/null 2>&1 || { echo "Se necesita Node.js para generar el SBOM de la UI." >&2; exit 1; }
 [[ -x "$backend_root/gradlew" ]] || { echo "No se encontró el wrapper Gradle en $backend_root." >&2; exit 1; }
 [[ -f "$ui_root/package.json" ]] || { echo "No se encuentra la UI. Inicializa el submódulo con git submodule update --init --recursive." >&2; exit 1; }
 
@@ -36,8 +37,8 @@ echo "1/4 Instalando dependencias y compilando UI..."
 (cd "$ui_root" && npm ci && npm run build -- --outDir "$ui_build_dir" --emptyOutDir)
 [[ -f "$ui_build_dir/index.html" ]] || { echo "La UI no produjo index.html." >&2; exit 1; }
 
-echo "2/4 Generando JAR ejecutable con UI integrada..."
-(cd "$backend_root" && ./gradlew bootJar "-PpreviewUiDir=$ui_build_dir" --console=plain)
+echo "2/4 Generando informes de licencias y JAR ejecutable con UI integrada..."
+(cd "$backend_root" && ./gradlew extractRuntimeDependencyLicenses "-PpreviewUiDir=$ui_build_dir" --no-daemon --console=plain)
 jar_file="$(find "$backend_root/build/libs" -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' ! -name 'devvault.jar' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
 [[ -n "$jar_file" && -f "$jar_file" ]] || { echo "Gradle no generó un JAR ejecutable." >&2; exit 1; }
 
@@ -50,6 +51,26 @@ cp -- "$script_dir/Iniciar-DevVault.sh" "$script_dir/Detener-DevVault.sh" "$stag
 cp -- "$backend_root/LICENSE" "$stage_root/LICENSE"
 cp -- "$script_dir/LEEME.txt" "$stage_root/LEEME.txt"
 chmod +x "$stage_root/Iniciar-DevVault.sh" "$stage_root/Detener-DevVault.sh"
+
+notice_root="$stage_root/third-party-notices"
+mkdir -p "$notice_root"
+cp -- "$backend_root/docs/THIRD-PARTY-NOTICES.md" "$notice_root/"
+cp -- "$backend_root"/build/reports/dependency-license/java-dependencies.* "$notice_root/"
+cp -- "$backend_root/build/reports/dependency-license/java-license-file-status.txt" "$backend_root/build/reports/dependency-license/java-packaged-jars.txt" "$notice_root/"
+cp -R -- "$backend_root/build/reports/dependency-license/java" "$notice_root/"
+node "$backend_root/scripts/collect-ui-license-files.mjs" \
+  "$ui_root" "$notice_root"
+for required in THIRD-PARTY-NOTICES.md java-dependencies.csv java-dependencies.html java-dependencies.xml java-license-file-status.txt java-packaged-jars.txt ui-sbom.cdx.json ui-license-file-status.txt; do
+  [[ -s "$notice_root/$required" ]] || { echo "Falta el documento de terceros requerido: $required" >&2; exit 1; }
+done
+embedded_jar_count="$(jar tf "$stage_root/devvault.jar" | grep -Ec '^BOOT-INF/lib/[^/]+\.jar$')"
+listed_jar_count="$(wc -l < "$notice_root/java-packaged-jars.txt" | tr -d ' ')"
+[[ "$embedded_jar_count" -gt 0 && "$embedded_jar_count" -eq "$listed_jar_count" ]] \
+  || { echo "La lista Java no coincide con los JAR incluidos en el backend." >&2; exit 1; }
+[[ -n "$(find "$notice_root/java" -type f -print -quit)" ]] \
+  || { echo "No se recopilaron textos de licencia de dependencias Java." >&2; exit 1; }
+[[ -n "$(find "$notice_root/ui" -type f -print -quit)" ]] \
+  || { echo "No se recopilaron textos de licencia de dependencias UI." >&2; exit 1; }
 
 echo "4/4 Comprimiendo paquete..."
 rm -f -- "$archive"

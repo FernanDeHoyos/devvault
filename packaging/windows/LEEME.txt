@@ -50,8 +50,9 @@ LICENCIA
 - El paquete también incluye dependencias Java y un runtime de OpenJDK; cada
   componente puede tener sus propios términos. El runtime incluye los avisos
   legales de OpenJDK en runtime\legal y algunos JAR incluyen avisos propios.
-- Esta preview todavía no incluye un aviso consolidado de licencias de terceros.
-  No redistribuyas el paquete hasta que la auditoría y los avisos estén completos.
+- Consulta third-party-notices para el inventario Java/UI y los textos de
+  licencia localizados. Es un borrador técnico para revisión especializada,
+  no una aprobación legal. No redistribuyas el paquete hasta cerrar esa revisión.
 
 PROYECTOS JAVA
 - DevVault se ejecuta con el runtime de Java 17 que incluye el paquete, pero no
