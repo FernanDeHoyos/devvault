@@ -45,7 +45,13 @@ DATOS Y REGISTROS
 - DevVault solo enlaza su API a 127.0.0.1.
 
 LICENCIA
-- DevVault Backend y UI se distribuyen bajo Apache License 2.0. Consulta LICENSE.
+- El código propio de DevVault Backend y UI se distribuye bajo Apache License
+  2.0. Consulta LICENSE.
+- El paquete también incluye dependencias Java y un runtime de OpenJDK; cada
+  componente puede tener sus propios términos. El runtime incluye los avisos
+  legales de OpenJDK en runtime\legal y algunos JAR incluyen avisos propios.
+- Esta preview todavía no incluye un aviso consolidado de licencias de terceros.
+  No redistribuyas el paquete hasta que la auditoría y los avisos estén completos.
 
 PROYECTOS JAVA
 - DevVault se ejecuta con el runtime de Java 17 que incluye el paquete, pero no

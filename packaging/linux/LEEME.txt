@@ -26,6 +26,10 @@ SEGURIDAD
   configuración de seguridad adicional.
 
 LICENCIA
-Backend y UI se distribuyen bajo Apache License 2.0. Este paquete incluye
-LICENSE. Los avisos de licencias de dependencias de terceros se publicarán
-junto con el release cuando termine su auditoría.
+El código propio de DevVault Backend y UI se distribuye bajo Apache License 2.0;
+este paquete incluye LICENSE. El paquete también contiene dependencias Java y
+un runtime de OpenJDK, que pueden tener términos propios. El runtime conserva
+los avisos legales en runtime/legal y algunos JAR incluyen avisos propios.
+
+Esta preview todavía no incluye un aviso consolidado de licencias de terceros.
+No redistribuyas el paquete hasta que la auditoría y los avisos estén completos.

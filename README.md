@@ -25,6 +25,39 @@ El estado, las decisiones y los criterios de aceptación de las mejoras están e
 [`docs/Roadmap-DevVault.md`](docs/Roadmap-DevVault.md).
 El estado y los pasos para preparar una versión pública están en
 [`docs/Distribucion-OpenSource.md`](docs/Distribucion-OpenSource.md).
+Las pautas para contribuir y reportar vulnerabilidades están en
+[`CONTRIBUTING.md`](CONTRIBUTING.md) y [`SECURITY.md`](SECURITY.md).
+
+## Descargar e instalar una versión
+
+Descarga el ZIP de Windows o el `.tar.gz` de Linux desde
+[GitHub Releases](https://github.com/FernanDeHoyos/devvault/releases). Cada
+paquete incluye su checksum SHA-256; verifica el archivo antes de extraerlo.
+
+En Windows PowerShell, compara el hash mostrado con el valor del archivo
+`.sha256` correspondiente:
+
+```powershell
+Get-FileHash .\DevVault-*-windows-*.zip -Algorithm SHA256
+Get-Content .\DevVault-*-windows-*.zip.sha256
+```
+
+En Linux:
+
+```bash
+sha256sum -c DevVault-*-linux-*.tar.gz.sha256
+```
+
+Extrae el paquete y ejecuta `Iniciar-DevVault.bat` en Windows o
+`./Iniciar-DevVault.sh` en Linux; usa los scripts `Detener-DevVault` para
+cerrarlo. Los paquetes incluyen Java 17 y la UI: no necesitas instalar Java ni
+Node para ejecutar DevVault. Sí necesitas Docker en funcionamiento para la base
+de datos PostgreSQL. Git, Node/npm y PHP/Composer solo hacen falta para las
+funciones o proyectos que los utilicen.
+
+La aplicación escucha en loopback y no tiene autenticación. No la expongas a
+redes no confiables. Consulta los archivos `LEEME.txt` incluidos en cada
+paquete para conocer los requisitos y limitaciones de esa plataforma.
 
 ## Stack
 
