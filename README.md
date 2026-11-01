@@ -31,22 +31,10 @@ Las pautas para contribuir y reportar vulnerabilidades están en
 ## Descargar e instalar una versión
 
 Descarga el ZIP de Windows o el `.tar.gz` de Linux desde
-[GitHub Releases](https://github.com/FernanDeHoyos/devvault/releases). Cada
-paquete incluye su checksum SHA-256; verifica el archivo antes de extraerlo.
-
-En Windows PowerShell, compara el hash mostrado con el valor del archivo
-`.sha256` correspondiente:
-
-```powershell
-Get-FileHash .\DevVault-*-windows-*.zip -Algorithm SHA256
-Get-Content .\DevVault-*-windows-*.zip.sha256
-```
-
-En Linux:
-
-```bash
-sha256sum -c DevVault-*-linux-*.tar.gz.sha256
-```
+[GitHub Releases](https://github.com/FernanDeHoyos/devvault/releases). No es
+necesario verificar el checksum para instalarlo; esa comprobación opcional
+sirve para confirmar que la descarga no se dañó ni fue modificada. Los archivos
+`.sha256` y las instrucciones están disponibles en la sección opcional de abajo.
 
 Extrae el paquete y ejecuta `Iniciar-DevVault.bat` en Windows o
 `./Iniciar-DevVault.sh` en Linux; usa los scripts `Detener-DevVault` para
@@ -58,6 +46,32 @@ funciones o proyectos que los utilicen.
 La aplicación escucha en loopback y no tiene autenticación. No la expongas a
 redes no confiables. Consulta los archivos `LEEME.txt` incluidos en cada
 paquete para conocer los requisitos y limitaciones de esa plataforma.
+
+<details>
+<summary>Opcional: comprobar la integridad de la descarga</summary>
+
+Esta comprobación no es necesaria para instalar DevVault. Si quieres usarla,
+guarda el paquete y su archivo `.sha256` en la misma carpeta.
+
+En Windows PowerShell, ejecuta:
+
+```powershell
+$zip = Get-Item .\DevVault-*-windows-*.zip
+$expected = (Get-Content "$($zip.FullName).sha256").Split()[0]
+$actual = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash
+if ($actual -eq $expected) { "Checksum correcto" } else { throw "El checksum no coincide; vuelve a descargar el paquete." }
+```
+
+En Linux, ejecuta:
+
+```bash
+sha256sum -c DevVault-*-linux-*.tar.gz.sha256
+```
+
+Si el checksum no coincide, no uses el archivo y vuelve a descargarlo. Esta
+comprobación solo detecta diferencias en el archivo; no certifica que el
+programa esté libre de vulnerabilidades.
+</details>
 
 ## Stack
 

@@ -12,7 +12,7 @@ fuera del primer lanzamiento.
 | CI | Run [40998188349](https://github.com/FernanDeHoyos/devvault/actions/runs/40998188349), commit `5268fae596326bcb28cbf2b768506b834c22b82f`: Windows y Ubuntu en verde; smoke tests y empaquetado completados | Repetir después de cualquier cambio de distribución |
 | Paquetes Windows y Linux | El usuario confirmó que probó DevVault en máquinas limpias y funciona | Conservar el resultado de la verificación de ambos sistemas; confirmar que los paquetes se descargaron del mismo commit que se publicará |
 | Dependencias | El empaquetador Windows genera un reporte Java, lista exacta de JARs, SBOM CycloneDX de dependencias npm de producción y copia los textos de licencia disponibles | Paquete Windows validado localmente; falta validar el empaquetador Linux en CI y revisar con especialista LGPL/EPL/GPL con Classpath Exception y entradas sin texto incluido |
-| Instalación | README ahora incluye descarga de Releases, verificación SHA-256, inicio/cierre y requisitos | Verificar los comandos contra paquetes finales y actualizar cualquier diferencia |
+| Instalación | README incluye descarga, inicio/cierre y requisitos; la verificación SHA-256 es opcional y está separada de los pasos de instalación | Verificar los comandos contra paquetes finales y actualizar cualquier diferencia |
 | Contribuciones y seguridad | Añadidos `CONTRIBUTING.md` y `SECURITY.md` | Habilitar y comprobar en la configuración de GitHub el reporte privado de vulnerabilidades |
 | Releases | El workflow publica al subir un tag `v*` si pasan ambos jobs de plataforma | No crear el tag hasta cerrar los pendientes anteriores; no hay tags de release todavía |
 
