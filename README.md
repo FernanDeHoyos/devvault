@@ -109,6 +109,11 @@ Si ya clonaste los dos repositorios, esto es todo lo que necesitas:
 .\scripts\Iniciar-dev.ps1
 ```
 
+También puedes iniciar DevVault con doble clic en `Iniciar-DevVault.bat` y
+detenerlo con `Detener-DevVault.bat`. Los `.bat` de la raíz son atajos para el
+entorno de desarrollo; los paquetes descargables incluyen sus propios
+`Iniciar-DevVault.bat` y `Detener-DevVault.bat`.
+
 Comprueba el JDK y Docker, levanta PostgreSQL, compila el backend
 **incluyendo la UI ya compilada** del repositorio hermano, espera a que la API
 responda y abre el navegador en `http://localhost:8080`. Para cerrar:
@@ -116,6 +121,9 @@ responda y abre el navegador en `http://localhost:8080`. Para cerrar:
 ```powershell
 .\scripts\Detener-dev.ps1
 ```
+
+Para detenerlo y cerrar PostgreSQL desde el acceso `.bat`, ejecuta
+`Detener-DevVault.bat -StopDatabase`.
 
 El script mide el tiempo de cada paso, así que sabes dónde se va el tiempo si
 algo va lento.
