@@ -158,6 +158,18 @@ Devuelve el catálogo estático de rutas HTTP detectadas en el código fuente de
 
 > El catálogo no ejecuta la aplicación. Las rutas construidas dinámicamente, registradas mediante patrones no soportados o condicionadas por lógica/configuración que el escáner no reconoce pueden no aparecer. Las rutas `resource` de Laravel se muestran como una declaración compacta, no como cada verbo generado por el framework.
 
+### `GET /projects/{id}/intelligence`
+Devuelve el stack tecnológico y un inventario arquitectónico leído de los manifiestos y archivos de configuración del proyecto.
+
+**Response `200`:** `projectId`, fecha del último escaneo (`scannedAt`), tecnologías agrupadas por categoría (`stack`), módulos (`modules`), dependencias (`dependencies`), bases de datos (`databases`), herramientas (`tools`), configuraciones (`configurations`), servicios declarados (`services`), nodos/relaciones (`map`) y advertencias de lectura (`warnings`).
+
+Los registros de dependencias indican gestor, versión disponible, archivo de evidencia y ámbito (`PRODUCTION`, `DEVELOPMENT` o `TRANSITIVE`). Las bases de datos distinguen configuración declarada (`CONFIGURED`), driver en dependencias (`DEPENDENCY`) y servicio encontrado en Compose (`DECLARED`). Estos estados no confirman que una base exista, acepte conexiones o esté ejecutándose. Los archivos de configuración se inspeccionan para identificar tecnología, pero no se devuelven sus URLs ni credenciales.
+
+> El mapa solo muestra relaciones directas que DevVault puede justificar con archivos detectados. No representa llamadas, topología en ejecución ni relaciones inferidas entre componentes.
+
+### `GET /projects/{id}/tree`
+Devuelve la estructura de archivos del proyecto como árbol de nodos con nombre, ruta relativa, tipo y, para carpetas, sus hijos. El recorrido es de solo lectura y limita la profundidad y cantidad de nodos; omite directorios generados y enlaces simbólicos. `truncated` indica que no se muestra todo el contenido de una carpeta. Devuelve `404` si la carpeta del proyecto ya no existe.
+
 ### `GET /projects/{id}/git`
 Consulta el estado Git local del proyecto: rama y commit actuales, cambios preparados/modificados/sin seguimiento, relación ahead/behind con upstream, ramas locales/remotas, hasta 50 commits y las últimas ejecuciones de `fetch` iniciadas desde DevVault.
 
@@ -454,8 +466,10 @@ configuración, que puede no coincidir con `defaultId` si el configurado no est�
 instalado.
 
 ### `POST /projects/{id}/open`
-Abre la carpeta del proyecto en el editor. El editor va como query param, no en
-el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
+Abre la carpeta del proyecto o un archivo de evidencia dentro de ella en el
+editor. El editor y `relativePath` son query params opcionales. La ruta debe ser
+relativa y resolverse dentro de la carpeta del proyecto; rutas absolutas,
+traversal y symlinks que salgan del proyecto se rechazan.
 **Response `200`:** `{ "projectId": "uuid", "projectName": "...", "editorId": "vscode", "editorName": "Visual Studio Code", "executablePath": "..." }`
 **Errores:**
 - `404` el proyecto no existe
@@ -483,6 +497,8 @@ el cuerpo: es un escalar único y así el endpoint se invoca sin argumentos.
 | GET | `/projects` | Discovery | CU-04 |
 | GET | `/projects/{id}` | Discovery | CU-04 |
 | GET | `/projects/{id}/routes` | Discovery | — |
+| GET | `/projects/{id}/intelligence` | Discovery | — |
+| GET | `/projects/{id}/tree` | Discovery | — |
 | GET | `/projects/{id}/git` | Git | — |
 | POST | `/projects/{id}/git/fetch` | Git | — |
 | DELETE | `/projects/{id}` | Discovery | — |

@@ -79,6 +79,33 @@ public class ReactNodePluginTest {
     }
 
     @Test
+    void shouldReportFrameworkAndVersionEvidence(@TempDir Path tempDir) throws IOException {
+        writePackageJson(tempDir, """
+                {"dependencies":{"vue":"^3.4.0","express":"^4.19.0","vite":"^5.0.0"}}
+                """);
+
+        DetectionResult result = plugin.detect(tempDir).orElseThrow();
+        List<?> findings = (List<?>) result.rawMarkers().get("stackFindings");
+
+        assertEquals("Vue", result.framework());
+        assertTrue(findings.stream().anyMatch(finding -> finding.toString().contains("vue")
+                && finding.toString().contains("^3.4.0")));
+        assertTrue(findings.stream().anyMatch(finding -> finding.toString().contains("Express")
+                && finding.toString().contains("BACKEND")));
+    }
+
+    @Test
+    void shouldKeepMalformedManifestAsWarningInsteadOfFailingTheScan(@TempDir Path tempDir) throws IOException {
+        writePackageJson(tempDir, "{ invalid json");
+
+        DetectionResult result = plugin.detect(tempDir).orElseThrow();
+
+        assertTrue(((List<?>) result.rawMarkers().get("warnings")).stream()
+                .anyMatch(warning -> warning.toString().contains("package.json")));
+        assertEquals("JavaScript", result.language());
+    }
+
+    @Test
     void shouldReturnEmptyIfNoPackageJson(@TempDir Path tempDir) {
         Optional<DetectionResult> result = plugin.detect(tempDir);
         // Verifica que no se detecta ningún proyecto si no hay package.json

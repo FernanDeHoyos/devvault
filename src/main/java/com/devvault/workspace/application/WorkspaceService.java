@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import com.devvault.shared.api.exception.ApiException;
+import com.devvault.discovery.application.ScanStatusTracker;
 import com.devvault.workspace.application.dto.CreatedWorkspaceRequest;
 import com.devvault.workspace.application.dto.WorkspaceResponse;
 import com.devvault.workspace.domain.Workspace;
@@ -27,12 +28,15 @@ public class WorkspaceService {
     // Repositorio de workspaces para interactuar con la base de datos
     private final WorkspaceRepository workspaceRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final ScanStatusTracker scanStatusTracker;
 
     // Constructor de la clase WorkspaceService que recibe un WorkspaceRepository como parámetro.
     // Este constructor permite la inyección de dependencias, lo que facilita las pruebas y la mantenibilidad del código.
-    public WorkspaceService(WorkspaceRepository workspaceRepository, ApplicationEventPublisher eventPublisher) {
+    public WorkspaceService(WorkspaceRepository workspaceRepository, ApplicationEventPublisher eventPublisher,
+            ScanStatusTracker scanStatusTracker) {
         this.workspaceRepository = workspaceRepository;
         this.eventPublisher = eventPublisher;
+        this.scanStatusTracker = scanStatusTracker;
     }
 
 
@@ -44,7 +48,16 @@ public class WorkspaceService {
     public void requestScan(UUID workspaceId) {
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Workspace not found with Id: " + workspaceId));
-        eventPublisher.publishEvent(new com.devvault.discovery.domain.event.WorkspaceScanRequestedEvent(workspaceId, workspace.getPath()));
+        if (!scanStatusTracker.tryMarkInProgress(workspaceId)) {
+            throw new ApiException(HttpStatus.CONFLICT, "A scan is already in progress for this workspace.");
+        }
+        try {
+            eventPublisher.publishEvent(
+                    new com.devvault.discovery.domain.event.WorkspaceScanRequestedEvent(workspaceId, workspace.getPath()));
+        } catch (RuntimeException e) {
+            scanStatusTracker.markFailed(workspaceId, e.getMessage());
+            throw e;
+        }
     }
 
     /**

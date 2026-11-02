@@ -46,10 +46,38 @@ por estado y ordenar la lista. Selecciona una tarjeta para abrir sus detalles.
 - Pulsa **Abrir en el editor** para abrir su carpeta en un editor detectado.
   Esta acción no inicia ni detiene el proyecto.
 
-DevVault solo puede iniciar los tipos de proyecto que reconoce y para los que
-están instaladas sus herramientas. En la beta se reconocen proyectos Spring
-Boot (Maven/Gradle), Node.js/React y PHP/Laravel. Si no se detecta un proyecto,
-comprueba que registraste la carpeta correcta y vuelve a escanear.
+En los detalles del proyecto, **Arquitectura del proyecto** organiza el análisis
+en secciones: **Resumen**, **Estructura**, **Stack y mapa**, **Dependencias** e
+**Infraestructura**. El resumen presenta los conteos y tecnologías principales;
+la estructura contiene un árbol expandible de archivos y módulos; y las demás
+secciones permiten consultar el detalle cuando lo necesitas. Puedes filtrar el
+stack por categoría y abrir el archivo de evidencia desde cada tarjeta.
+El mapa de arquitectura es un diagrama agrupado por tipo de componente; sus
+tarjetas de detalle y los inventarios extensos tienen un área de desplazamiento
+propia para que no ocupen toda la página.
+Los grupos del diagrama se pueden seleccionar para filtrar el detalle.
+**Dashboard** y **Monitoring** incluyen gráficas de CPU y memoria con un
+selector para ver todos los proyectos activos o uno individual. Las muestras
+se consultan cada dos segundos y la vista conserva hasta cinco minutos; la
+memoria mostrada no equivale a la RAM total del equipo.
+
+El árbol omite directorios generados y enlaces simbólicos, y limita la cantidad
+de contenido mostrado para que proyectos grandes sigan siendo navegables.
+
+En **Bases de datos**, “Configuración declarada” significa que se encontró un
+proveedor o URL en un archivo; “Driver declarado” indica una dependencia; y
+“Servicio declarado” indica un servicio Compose. Ninguno de esos estados
+confirma una conexión o que el servicio esté en ejecución. El mapa relaciona
+el proyecto con componentes declarados y no es un grafo de llamadas ni afirma
+conexiones que el escaneo no pudo verificar.
+
+El escáner identifica evidencia de Java/Kotlin, JavaScript/TypeScript, PHP,
+Python, HTML, CSS y SQL, además de frameworks y herramientas declarados en los
+manifiestos compatibles. La detección no implica que DevVault pueda iniciar
+cualquier proyecto: en esta beta, el inicio automático está limitado a los
+tipos configurados (Spring Boot, Node.js y PHP) y a las herramientas instaladas
+en el equipo. Si no se detecta un proyecto, comprueba la carpeta y vuelve a
+escanear.
 
 ## 4. Consultar logs y estado
 

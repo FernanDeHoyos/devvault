@@ -68,13 +68,15 @@ function Stop-Backend([System.Diagnostics.Process]$BackendProcess) {
     if (-not $BackendProcess) { return }
     $BackendProcess.Refresh()
     if (-not $BackendProcess.HasExited) {
-        & taskkill.exe /PID $BackendProcess.Id /T /F *> $null
+        Stop-Process -Id $BackendProcess.Id -Force
+        if (-not $BackendProcess.WaitForExit(10000)) {
+            throw "El backend temporal PID $($BackendProcess.Id) no terminó a tiempo."
+        }
         $BackendProcess.Refresh()
         if (-not $BackendProcess.HasExited) {
             throw "No se pudo detener el backend temporal PID $($BackendProcess.Id)."
         }
     }
-    [void]$BackendProcess.WaitForExit(10000)
 }
 
 function Wait-Backend([System.Diagnostics.Process]$BackendProcess) {
@@ -141,8 +143,15 @@ try {
     $workspacePath = (Get-Item -LiteralPath $workspacePath).FullName
     $nodeProjectPath = Join-Path $workspacePath "node-project"
     New-Item -ItemType Directory -Path $nodeProjectPath | Out-Null
+    $infrastructurePath = Join-Path $nodeProjectPath "infrastructure"
+    New-Item -ItemType Directory -Path $infrastructurePath | Out-Null
     $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText((Join-Path $nodeProjectPath "package.json"), '{"name":"devvault-node-smoke","version":"1.0.0","scripts":{"start":"node server.js"}}', $utf8WithoutBom)
+    [System.IO.File]::WriteAllText((Join-Path $nodeProjectPath "package.json"), '{"name":"devvault-node-smoke","version":"1.0.0","scripts":{"start":"node server.js"},"dependencies":{"left-pad":"^1.3.0"}}', $utf8WithoutBom)
+    [System.IO.File]::WriteAllText((Join-Path $infrastructurePath "compose.yml"), @'
+services:
+  db:
+    image: postgres:16
+'@, $utf8WithoutBom)
     [System.IO.File]::WriteAllText((Join-Path $nodeProjectPath "server.js"), @'
 const http = require("node:http");
 const server = http.createServer((_request, response) => response.end("DevVault Node smoke OK"));
@@ -165,7 +174,16 @@ server.listen(3000, "127.0.0.1", () => console.log("DevVault Node smoke listenin
     $jsAsset = [regex]::Match($page.Content, 'src="([^"]+\.js)"').Groups[1].Value
     $cssAsset = [regex]::Match($page.Content, 'href="([^"]+\.css)"').Groups[1].Value
     if (-not $jsAsset -or -not $cssAsset) { throw "La portada no declara los assets JS y CSS." }
-    [void](Invoke-WebRequest -Uri "$baseUrl$jsAsset" -TimeoutSec 10 -UseBasicParsing)
+    $javascript = Invoke-WebRequest -Uri "$baseUrl$jsAsset" -TimeoutSec 10 -UseBasicParsing
+    if ($javascript.Content -notmatch "Stack tecnológico y mapa") {
+        throw "El bundle servido no contiene el panel de inteligencia del proyecto. Reconstruye el JAR con la UI actualizada."
+    }
+    $hasArchitectureInventory = $javascript.Content -match "Dependencias declaradas" `
+        -and $javascript.Content -match "Bases de datos" `
+        -and $javascript.Content -match "Servicios declarados"
+    if (-not $hasArchitectureInventory) {
+        throw "El bundle servido no contiene el inventario arquitectónico actualizado."
+    }
     [void](Invoke-WebRequest -Uri "$baseUrl$cssAsset" -TimeoutSec 10 -UseBasicParsing)
 
     Write-Host "3/7 Creando un workspace temporal..."
@@ -189,6 +207,24 @@ server.listen(3000, "127.0.0.1", () => console.log("DevVault Node smoke listenin
     $projects = Invoke-RestMethod -Uri "$baseUrl/api/v1/projects?workspaceId=$workspaceId" -TimeoutSec 10
     $project = @($projects | Where-Object { $_.path -eq $nodeProjectPath } | Select-Object -First 1)
     if (-not $project) { throw "El escaneo no detectó el proyecto Node temporal." }
+    $intelligence = Invoke-RestMethod -Uri "$baseUrl/api/v1/projects/$($project[0].id)/intelligence" -TimeoutSec 10
+    $detectedJavaScript = @($intelligence.stack | Where-Object { $_.name -eq "JavaScript" })
+    $detectedNode = @($intelligence.stack | Where-Object { $_.name -eq "Node.js" })
+    if (-not $detectedJavaScript -or -not $detectedNode) {
+        throw "El endpoint de inteligencia no devolvió el stack JavaScript/Node del proyecto de prueba."
+    }
+    if (-not $detectedNode[0].evidence -or $intelligence.map.nodes.Count -lt 3 -or $intelligence.map.edges.Count -lt 2) {
+        throw "El endpoint de inteligencia no devolvió evidencias y relaciones para el mapa del proyecto."
+    }
+    if (-not (@($intelligence.dependencies | Where-Object { $_.name -eq "left-pad" -and $_.scope -eq "PRODUCTION" }))) {
+        throw "El endpoint de inteligencia no devolvió la dependencia declarada del proyecto."
+    }
+    if (-not (@($intelligence.databases | Where-Object { $_.name -eq "PostgreSQL" -and $_.status -eq "DECLARED" }))) {
+        throw "El endpoint de inteligencia no reconoció la base de datos declarada en Compose."
+    }
+    if (-not (@($intelligence.services | Where-Object { $_.name -eq "db" }))) {
+        throw "El endpoint de inteligencia no devolvió el servicio Compose de prueba."
+    }
     $started = Invoke-RestMethod -Uri "$baseUrl/api/v1/projects/$($project[0].id)/start" -Method Post -TimeoutSec 10
     if ($started.overallStatus -ne "RUNNING") { throw "El proyecto Node no inició: $($started.overallStatus)" }
     $nodeResponse = Invoke-WebRequest -Uri "http://127.0.0.1:3000/" -TimeoutSec 10 -UseBasicParsing
@@ -227,7 +263,7 @@ server.listen(3000, "127.0.0.1", () => console.log("DevVault Node smoke listenin
     }
 
     $succeeded = $true
-    Write-Host "7/7 Smoke test OK: health, UI, assets, SPA, proyecto Node start/stop, CRUD y persistencia." -ForegroundColor Green
+    Write-Host "7/7 Smoke test OK: health, UI de inteligencia, stack/mapa e inventario, assets, SPA, Node start/stop, CRUD y persistencia." -ForegroundColor Green
 } catch {
     Write-Host "Smoke test FAILED: $($_.Exception.ToString())" -ForegroundColor Red
     throw
@@ -237,8 +273,28 @@ server.listen(3000, "127.0.0.1", () => console.log("DevVault Node smoke listenin
     }
     if ($process) {
         $process.Refresh()
-        if (-not $process.HasExited) {
-            try { Stop-Backend $process } catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
+        $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)" -ErrorAction SilentlyContinue
+        $ownsSmokeBackend = -not $process.HasExited -and [bool]$processInfo `
+            -and $processInfo.CommandLine -like "*$resolvedJar*--server.port=$Port*"
+        if ($ownsSmokeBackend) {
+            try {
+                Stop-Process -Id $process.Id -Force
+                if (-not $process.WaitForExit(10000)) {
+                    Write-Host "El backend temporal PID $($process.Id) no terminó a tiempo." -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host $_.Exception.Message -ForegroundColor Yellow
+            }
+        }
+    }
+    $portListener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($portListener) {
+        $listenerInfo = Get-CimInstance Win32_Process `
+            -Filter "ProcessId = $($portListener.OwningProcess)" -ErrorAction SilentlyContinue
+        $isSmokeBackend = $listenerInfo -and $listenerInfo.CommandLine -like "*$resolvedJar*--server.port=$Port*"
+        if ($isSmokeBackend) {
+            Stop-Process -Id $portListener.OwningProcess -Force
         }
     }
     if ($databaseContainer) {

@@ -27,6 +27,10 @@ El estado y los pasos para preparar una versión pública están en
 [`docs/Distribucion-OpenSource.md`](docs/Distribucion-OpenSource.md).
 La guía para empezar a usar la aplicación está en
 [`docs/GUIA-USUARIO.md`](docs/GUIA-USUARIO.md).
+La épica completa de Project Intelligence está en
+[`docs/DevVault-Project-Intelligence.md`](docs/DevVault-Project-Intelligence.md);
+el alcance inicial de escaneo, stack y mapa está en
+[`docs/ESPECIFICACION-ESCANEO-STACK-MAPA.md`](docs/ESPECIFICACION-ESCANEO-STACK-MAPA.md).
 Las pautas para contribuir y reportar vulnerabilidades están en
 [`CONTRIBUTING.md`](CONTRIBUTING.md) y [`SECURITY.md`](SECURITY.md).
 

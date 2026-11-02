@@ -78,6 +78,10 @@ public class OpenProjectInEditorUseCase {
      *                  configurado
      */
     public OpenedProject execute(UUID projectId, String editorId) {
+        return execute(projectId, editorId, null);
+    }
+
+    public OpenedProject execute(UUID projectId, String editorId, String relativePath) {
 
         // 1. El proyecto tiene que existir. Se consulta por ProjectLookupService
         //    y no por la entidad de discovery, para no acoplar este módulo al
@@ -95,6 +99,7 @@ public class OpenProjectInEditorUseCase {
                     "La carpeta del proyecto ya no existe: " + projectPath
                             + ". Vuelve a escanear el workspace para actualizar DevVault.");
         }
+        Path targetPath = resolveTarget(projectPath, relativePath);
 
         // 3. Editor pedido -> configurado -> primer disponible.
         EditorDescriptor editor = resolveEditor(editorId);
@@ -106,11 +111,36 @@ public class OpenProjectInEditorUseCase {
                             + ". Configura otro con la variable DEVVAULT_DEFAULT_EDITOR.");
         }
 
-        launch(editor, executable.get(), projectPath);
+        launch(editor, executable.get(), projectPath, targetPath);
 
         log.info("Proyecto {} abierto en {} ({})", projectId, editor.displayName(), executable.get());
         return new OpenedProject(projectId, project.name(), editor.id(), editor.displayName(),
                 executable.get().toString());
+    }
+
+    private Path resolveTarget(Path projectPath, String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            return projectPath;
+        }
+
+        try {
+            Path requested = Path.of(relativePath);
+            if (requested.isAbsolute() || requested.normalize().startsWith("..")) {
+                throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "La ruta de evidencia debe ser relativa a la carpeta del proyecto.");
+            }
+
+            Path realProject = projectPath.toRealPath();
+            Path target = realProject.resolve(requested).normalize().toRealPath();
+            if (!target.startsWith(realProject)) {
+                throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "La ruta de evidencia debe permanecer dentro de la carpeta del proyecto.");
+            }
+            return target;
+        } catch (java.io.IOException | java.nio.file.InvalidPathException e) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "No se encontró la evidencia dentro de la carpeta del proyecto: " + relativePath);
+        }
     }
 
     /**
@@ -129,8 +159,8 @@ public class OpenProjectInEditorUseCase {
                                 + "IntelliJ IDEA, Sublime Text o Zed y vuelve a intentarlo."));
     }
 
-    private void launch(EditorDescriptor editor, Path executable, Path projectPath) {
-        List<String> command = buildCommand(executable, projectPath);
+    private void launch(EditorDescriptor editor, Path executable, Path projectPath, Path targetPath) {
+        List<String> command = buildCommand(executable, targetPath);
         try {
             ProcessBuilder builder = new ProcessBuilder(command)
                     .directory(projectPath.toFile())

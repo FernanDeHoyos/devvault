@@ -80,7 +80,40 @@ public class SpringBootPlugin implements TechnologyPlugin {
         markers.put("springBootDetected", springBootDetected);
         markers.put("buildSystem", hasMaven ? "Maven" : "Gradle");
         markers.put("buildFiles", BUILD_FILES.stream().filter(name -> Files.isRegularFile(projectDir.resolve(name))).toList());
-        return Optional.of(new DetectionResult("Java", framework, springBootDetected ? bootVersion : null, markers));
+        List<String> warnings = BUILD_FILES.stream()
+                .filter(name -> Files.isRegularFile(projectDir.resolve(name)) && !Files.isReadable(projectDir.resolve(name)))
+                .map(name -> "No se pudo leer " + name + ".")
+                .toList();
+        if (!warnings.isEmpty()) {
+            markers.put("warnings", warnings);
+        }
+        String marker = stringMarker(markers.get("marker"));
+        List<Map<String, Object>> stackFindings = new ArrayList<>();
+        boolean hasKotlin = Files.isDirectory(projectDir.resolve("src/main/kotlin"))
+                || kotlinJvmProject(gradle);
+        boolean hasJava = Files.isDirectory(projectDir.resolve("src/main/java"))
+                || !hasKotlin;
+        if (hasJava) {
+            stackFindings.add(TechnologyEvidence.direct(
+                    "Java", "LANGUAGE", null, marker, "Java project source/build marker", marker, true));
+        }
+        if (hasKotlin) {
+            stackFindings.add(TechnologyEvidence.direct(
+                    "Kotlin", "LANGUAGE", null,
+                    Files.isDirectory(projectDir.resolve("src/main/kotlin")) ? "src/main/kotlin" : marker,
+                    "Kotlin JVM source/plugin", "Kotlin project source/build marker", !hasJava));
+        }
+        if (springBootDetected) {
+            stackFindings.add(TechnologyEvidence.direct(
+                    "Spring Boot", "BACKEND", bootVersion, marker,
+                    "Spring Boot dependency/plugin", bootVersion, true));
+        }
+        String buildSystem = hasMaven ? "Maven" : "Gradle";
+        stackFindings.add(TechnologyEvidence.direct(
+                buildSystem, "TOOLS", null, marker, "build system", buildSystem, true));
+        markers.put("stackFindings", stackFindings);
+        return Optional.of(new DetectionResult(hasKotlin && !hasJava ? "Kotlin" : "Java",
+                framework, springBootDetected ? bootVersion : null, markers));
     }
 
     @Override
@@ -240,10 +273,18 @@ public class SpringBootPlugin implements TechnologyPlugin {
     private boolean isJavaGradleProject(Path projectDir, String gradleContent) {
         boolean javaPlugin = Pattern.compile("\\bid\\s*\\(?\\s*['\"](?:java|java-library)['\"]|\\bapply\\s+plugin\\s*:\\s*['\"]java['\"]|(?s)plugins\\s*\\{\\s*java(?:\\s|})")
                 .matcher(gradleContent).find();
-        boolean kotlinJvmPlugin = Pattern.compile("org\\.jetbrains\\.kotlin\\.jvm|kotlin\\(['\"]jvm['\"]\\)")
-                .matcher(gradleContent).find();
+        boolean kotlinJvmPlugin = kotlinJvmProject(gradleContent);
         return javaPlugin || kotlinJvmPlugin || Files.isDirectory(projectDir.resolve("src/main/java"))
                 || Files.isDirectory(projectDir.resolve("src/main/kotlin"));
+    }
+
+    private boolean kotlinJvmProject(String gradleContent) {
+        return Pattern.compile("org\\.jetbrains\\.kotlin\\.jvm|kotlin\\(['\"]jvm['\"]\\)")
+                .matcher(gradleContent).find();
+    }
+
+    private String stringMarker(Object marker) {
+        return marker instanceof String value ? value : "build configuration";
     }
 
     @Override

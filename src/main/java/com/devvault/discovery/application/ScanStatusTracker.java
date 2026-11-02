@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.stereotype.Component;
 
@@ -49,6 +50,18 @@ public class ScanStatusTracker {
                 0, Instant.now(), 
                 null, 
                 null));
+        }
+
+        public boolean tryMarkInProgress(UUID workspaceId) {
+            AtomicBoolean started = new AtomicBoolean(false);
+            statuses.compute(workspaceId, (id, current) -> {
+                if (current != null && current.status() == ScanStatus.IN_PROGRESS) {
+                    return current;
+                }
+                started.set(true);
+                return new Snapshot(ScanStatus.IN_PROGRESS, 0, Instant.now(), null, null);
+            });
+            return started.get();
         }
 
         /**

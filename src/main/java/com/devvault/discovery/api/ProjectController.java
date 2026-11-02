@@ -20,7 +20,11 @@ import com.devvault.discovery.application.dto.ProjectResponse;
 import com.devvault.discovery.application.GitInfoReader;
 import com.devvault.discovery.application.RouteScanner;
 import com.devvault.discovery.application.ProjectDeletionService;
+import com.devvault.discovery.application.ProjectIntelligenceService;
+import com.devvault.discovery.application.ProjectStructureService;
 import com.devvault.discovery.application.dto.ProjectRouteResponse;
+import com.devvault.discovery.application.dto.ProjectIntelligenceResponse;
+import com.devvault.discovery.application.dto.ProjectTreeNode;
 import com.devvault.discovery.domain.Project;
 import com.devvault.discovery.domain.ProjectProfile;
 import com.devvault.discovery.infraestructure.ProjectRepository;
@@ -41,6 +45,8 @@ public class ProjectController {
     private final RouteScanner routeScanner;
     private final ProjectDeletionService projectDeletionService;
     private final ProjectProfileRepository projectProfileRepository;
+    private final ProjectIntelligenceService projectIntelligenceService;
+    private final ProjectStructureService projectStructureService;
     
     public ProjectController(
         ProjectRepository projectRepository,
@@ -48,13 +54,17 @@ public class ProjectController {
         MonitoringService monitoringService,
         RouteScanner routeScanner,
         ProjectDeletionService projectDeletionService,
-        ProjectProfileRepository projectProfileRepository) {
+        ProjectProfileRepository projectProfileRepository,
+        ProjectIntelligenceService projectIntelligenceService,
+        ProjectStructureService projectStructureService) {
         this.projectRepository = projectRepository;
         this.gitInfoReader = gitInfoReader;
         this.monitoringService = monitoringService;
         this.routeScanner = routeScanner;
         this.projectDeletionService = projectDeletionService;
         this.projectProfileRepository = projectProfileRepository;
+        this.projectIntelligenceService = projectIntelligenceService;
+        this.projectStructureService = projectStructureService;
     }
 
     /**
@@ -119,6 +129,21 @@ public List<ProjectResponse> findAll(
         Project project = projectRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Project not found with id: " + id));
         return routeScanner.scan(Path.of(project.getPath()));
+    }
+
+    @GetMapping("/{id}/intelligence")
+    public ProjectIntelligenceResponse intelligence(@PathVariable("id") UUID id) {
+        Project project = projectRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Project not found with id: " + id));
+        ProjectProfile profile = projectProfileRepository.findByProjectId(id).orElse(null);
+        return projectIntelligenceService.describe(project, profile);
+    }
+
+    @GetMapping("/{id}/tree")
+    public ProjectTreeNode tree(@PathVariable("id") UUID id) {
+        Project project = projectRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Project not found with id: " + id));
+        return projectStructureService.scan(Path.of(project.getPath()));
     }
 
     /** Deletes the project from DevVault while preserving its files on disk. */

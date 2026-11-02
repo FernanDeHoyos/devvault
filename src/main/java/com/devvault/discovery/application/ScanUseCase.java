@@ -51,7 +51,6 @@ public class ScanUseCase {
     @EventListener
     public void onWorkspaceScanRequest(WorkspaceScanRequestedEvent event) {
         log.info(">>> Evento recibido. workspaceId={}, path={}", event.workspaceId(), event.workspacePath());
-        scanStatusTracker.markInProgress(event.workspaceId());
  
         try {
             List<ScannerEngine.ScannedProject> scanned = scannerEngine.scan(Path.of(event.workspacePath()));

@@ -92,7 +92,8 @@ public class EditorController {
     @PostMapping("/api/v1/projects/{id}/open")
     public OpenedProjectResponse open(
             @PathVariable("id") UUID id,
-            @RequestParam(name = "editorId", required = false) String editorId) {
-        return OpenedProjectResponse.from(openProjectInEditor.execute(id, editorId));
+            @RequestParam(name = "editorId", required = false) String editorId,
+            @RequestParam(name = "relativePath", required = false) String relativePath) {
+        return OpenedProjectResponse.from(openProjectInEditor.execute(id, editorId, relativePath));
     }
 }

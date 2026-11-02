@@ -55,18 +55,22 @@ public class PhpPlugin implements TechnologyPlugin {
 
         JsonNode manifest = null;
         boolean manifestParsed = false;
+        List<String> warnings = new java.util.ArrayList<>();
         if (hasComposer) {
             try {
                 manifest = objectMapper.readTree(composerFile.toFile());
                 manifestParsed = manifest != null && manifest.isObject();
-            } catch (IOException ignored) {
-                // The manifest itself is still enough to recognize an incomplete PHP project.
+            } catch (IOException e) {
+                warnings.add("No se pudo interpretar composer.json; se mostrarán solo detecciones respaldadas por otros archivos.");
             }
         }
 
         Map<String, String> packages = new LinkedHashMap<>();
         collectManifestPackages(manifest, packages);
         boolean lockDetected = collectLockedPackages(projectDir.resolve("composer.lock"), packages);
+        if (Files.isRegularFile(projectDir.resolve("composer.lock")) && !lockDetected) {
+            warnings.add("No se pudo interpretar composer.lock.");
+        }
 
         boolean laravelDetected = packages.containsKey("laravel/framework") || hasLaravelEntrypoint;
         List<String> filamentPackages = packages.keySet().stream()
@@ -104,6 +108,32 @@ public class PhpPlugin implements TechnologyPlugin {
         markers.put("technologies", technologies);
         markers.put("technologyPackages", filamentPackages);
         markers.put("detectedPackages", detectedPackages);
+        if (!warnings.isEmpty()) {
+            markers.put("warnings", warnings);
+        }
+
+        List<Map<String, Object>> stackFindings = new java.util.ArrayList<>();
+        String marker = String.valueOf(markers.get("marker"));
+        stackFindings.add(TechnologyEvidence.direct(
+                "PHP", "LANGUAGE", phpConstraint, marker, "PHP project marker",
+                phpConstraint, true));
+        if (hasComposer) {
+            stackFindings.add(TechnologyEvidence.direct(
+                    "Composer", "TOOLS", null, "composer.json",
+                    "Composer manifest", "composer.json", true));
+        }
+        if (laravelDetected) {
+            stackFindings.add(TechnologyEvidence.direct(
+                    "Laravel", "BACKEND", packages.get("laravel/framework"),
+                    packages.containsKey("laravel/framework") ? "composer.json" : "artisan",
+                    "laravel/framework", packages.get("laravel/framework"), true));
+        }
+        for (String packageName : filamentPackages) {
+            stackFindings.add(TechnologyEvidence.direct(
+                    "Filament", "BACKEND", packages.get(packageName),
+                    hasComposer ? "composer.json" : "composer.lock", packageName, packages.get(packageName), false));
+        }
+        markers.put("stackFindings", stackFindings);
 
         return Optional.of(new DetectionResult("PHP", framework, version, markers));
     }

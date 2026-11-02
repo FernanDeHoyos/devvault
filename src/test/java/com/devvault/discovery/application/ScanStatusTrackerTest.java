@@ -73,6 +73,23 @@ class ScanStatusTrackerTest {
     }
 
     @Test
+    void noPermiteIniciarDosEscaneosSimultaneosDelMismoWorkspace() {
+        UUID workspaceId = UUID.randomUUID();
+
+        assertThat(tracker.tryMarkInProgress(workspaceId)).isTrue();
+        assertThat(tracker.tryMarkInProgress(workspaceId)).isFalse();
+    }
+
+    @Test
+    void permiteReintentarDespuesDeCompletarUnEscaneo() {
+        UUID workspaceId = UUID.randomUUID();
+        tracker.tryMarkInProgress(workspaceId);
+        tracker.markCompleted(workspaceId, 1);
+
+        assertThat(tracker.tryMarkInProgress(workspaceId)).isTrue();
+    }
+
+    @Test
     void forgetDevuelveElWorkspaceAlEstadoNuncaEscaneado() {
 
         UUID workspaceId = UUID.randomUUID();

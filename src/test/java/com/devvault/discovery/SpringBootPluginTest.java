@@ -81,6 +81,21 @@ class SpringBootPluginTest  {
         assertEquals(null, result.get().version());
     }
 
+    @Test
+    void shouldDetectKotlinAsASeparateLanguage(@TempDir Path tempDir) throws IOException {
+        Files.writeString(tempDir.resolve("build.gradle.kts"), """
+                plugins {
+                    kotlin("jvm") version "2.0.0"
+                }
+                """);
+
+        DetectionResult result = plugin.detect(tempDir).orElseThrow();
+
+        assertEquals("Kotlin", result.language());
+        assertTrue(((java.util.List<?>) result.rawMarkers().get("stackFindings")).stream()
+                .anyMatch(finding -> finding.toString().contains("Kotlin")));
+    }
+
     /**
      * Prueba que el plugin devuelve vacío si no hay un archivo pom.xml en el directorio.
      * @param tempDir un directorio temporal proporcionado por JUnit para la prueba
