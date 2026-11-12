@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 
 $packageRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $composeFile = Join-Path $packageRoot "compose.preview.yml"
@@ -21,6 +21,7 @@ function Stop-WithMessage([string]$message) {
     exit 1
 }
 
+if (-not $env:DEVVAULT_DB_URL) {
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Stop-WithMessage "No se encontró Docker. Instala Docker Desktop y vuelve a abrir DevVault."
 }
@@ -46,6 +47,10 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
     Start-Sleep -Seconds 2
 }
 if (-not $databaseReady) { Stop-WithMessage "PostgreSQL no quedó listo. Consulta Docker Desktop e inténtalo de nuevo." }
+
+} else {
+    Write-Host 'Usando la base de datos configurada; no se inicia Docker.'
+}
 
 try {
     $existingResponse = Invoke-WebRequest -Uri "$apiBaseUrl/api/v1/health" -TimeoutSec 2 -UseBasicParsing

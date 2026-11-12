@@ -25,6 +25,10 @@ import org.springframework.stereotype.Component;
 import org.xml.sax.SAXException;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
+import org.yaml.snakeyaml.LoaderOptions;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
+import org.yaml.snakeyaml.error.YAMLException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,7 +51,7 @@ public class ProjectArchitecturePlugin implements TechnologyPlugin {
             ".next", ".nuxt", ".cache", "coverage", "__pycache__", ".venv", "venv");
     private static final Set<String> MANIFESTS = Set.of(
             "pom.xml", "build.gradle", "build.gradle.kts", "package.json", "composer.json",
-            "pyproject.toml", "requirements.txt", "Pipfile");
+            "pyproject.toml", "requirements.txt", "Pipfile", "go.mod", "go.work", "Cargo.toml");
     private static final Pattern GRADLE_DEPENDENCY = Pattern.compile(
             "(?m)^\\s*(implementation|api|compileOnly|runtimeOnly|testImplementation|testRuntimeOnly|"
                     + "developmentOnly|annotationProcessor|kapt|classpath)\\s*(?:\\(\\s*)?['\"]"
@@ -595,15 +599,7 @@ public class ProjectArchitecturePlugin implements TechnologyPlugin {
     }
 
     private boolean isWithinReadLimit(Path file, long maxBytes, String label, List<String> warnings) {
-        try {
-            if (Files.size(file) <= maxBytes) {
-                return true;
-            }
-            warnings.add("Se omitió " + label + " porque supera el tamaño máximo de lectura.");
-        } catch (IOException e) {
-            warnings.add("No se pudo leer " + label + ".");
-        }
-        return false;
+        return ProjectFileReader.withinLimit(file, maxBytes, label, warnings);
     }
 
     private void addJsonDependencies(JsonNode object, String scope, String manager, String file,
@@ -656,27 +652,31 @@ public class ProjectArchitecturePlugin implements TechnologyPlugin {
     private void collectSourceAreas(Path root, List<Map<String, Object>> modules, List<String> warnings) {
         Set<String> recognized = Set.of(
                 "frontend", "backend", "api", "web", "client", "server", "database", "db",
-                "infra", "infrastructure", "services", "packages", "apps", "migrations", "routes");
+                "infra", "infrastructure", "services", "packages", "apps", "migrations", "routes",
+                "domain", "application", "ports", "adapters", "controllers", "controller",
+                "service", "repositories", "repository", "models", "views", "usecases",
+                "use-cases", "entities", "internal", "cmd", "pkg");
         try {
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
-                    if (!directory.equals(root) && IGNORED_DIRS.contains(directory.getFileName().toString())) {
-                        return FileVisitResult.SKIP_SUBTREE;
-                    }
-                    return directory.getNameCount() - root.getNameCount() > 3
-                            ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
-                }
+                private int visited;
 
                 @Override
-                public FileVisitResult postVisitDirectory(Path directory, IOException exception) {
-                    if (directory.equals(root) || modules.size() >= MAX_MODULES
-                            || !recognized.contains(directory.getFileName().toString().toLowerCase(Locale.ROOT))) {
-                        return FileVisitResult.CONTINUE;
+                public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                    if (modules.size() >= MAX_MODULES || ++visited > 2_500) {
+                        warnings.add("El mapa de áreas de código se limitó por el tamaño del proyecto.");
+                        return FileVisitResult.TERMINATE;
                     }
-                    String path = relative(root, directory);
-                    modules.add(module(path, "SOURCE_AREA", path, "directory"));
-                    return FileVisitResult.CONTINUE;
+                    if (!directory.equals(root) && (IGNORED_DIRS.contains(directory.getFileName().toString())
+                            || directory.getFileName().toString().startsWith("."))) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    int depth = directory.getNameCount() - root.getNameCount();
+                    if (depth > 0 && depth <= 9
+                            && recognized.contains(directory.getFileName().toString().toLowerCase(Locale.ROOT))) {
+                        String path = relative(root, directory);
+                        modules.add(module(path, "SOURCE_AREA", path, "directory"));
+                    }
+                    return depth >= 9 ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
                 }
             });
         } catch (IOException e) {
@@ -870,48 +870,37 @@ public class ProjectArchitecturePlugin implements TechnologyPlugin {
                 warnings.add("Se omitió " + composeName + " porque supera el tamaño máximo de lectura.");
                 return;
             }
-            List<String> lines = Files.readAllLines(compose);
-            boolean inServices = false;
-            String serviceName = null;
-            String image = null;
-            for (String line : lines) {
-                if (line.matches("^services\\s*:\\s*(?:#.*)?$")) {
-                    inServices = true;
-                    continue;
-                }
-                if (!inServices) {
-                    continue;
-                }
-                Matcher service = Pattern.compile("^ {2}([A-Za-z0-9._-]+):\\s*(?:#.*)?$").matcher(line);
-                if (service.find()) {
-                    if (serviceName != null) {
-                        addComposeService(composeName, serviceName, image, services, databases);
-                    }
-                    serviceName = service.group(1);
-                    image = null;
-                    continue;
-                }
-                if (serviceName != null) {
-                    Matcher imageLine = Pattern.compile("^ {4}image\\s*:\\s*[\"']?([^\\s\"'#]+)")
-                            .matcher(line);
-                    if (imageLine.find()) {
-                        image = imageLine.group(1);
-                    }
-                }
+            LoaderOptions options = new LoaderOptions();
+            options.setAllowDuplicateKeys(false);
+            options.setMaxAliasesForCollections(20);
+            Object document = new Yaml(new SafeConstructor(options)).load(Files.readString(compose));
+            if (!(document instanceof Map<?, ?> rootMap)
+                    || !(rootMap.get("services") instanceof Map<?, ?> serviceMap)) {
+                return;
             }
-            if (serviceName != null) {
-                addComposeService(composeName, serviceName, image, services, databases);
+            for (var entry : serviceMap.entrySet()) {
+                if (!(entry.getKey() instanceof String name) || !(entry.getValue() instanceof Map<?, ?> definition)) {
+                    continue;
+                }
+                String image = definition.get("image") instanceof String value ? value : null;
+                Object declared = definition.get("depends_on");
+                List<String> dependsOn = (declared instanceof Map<?, ?> dependencies ? dependencies.keySet().stream()
+                        : declared instanceof List<?> dependencies ? dependencies.stream() : java.util.stream.Stream.empty())
+                        .filter(String.class::isInstance).map(String.class::cast).distinct().toList();
+                addComposeService(composeName, name, image, dependsOn, services, databases);
             }
-        } catch (IOException e) {
+        } catch (IOException | YAMLException e) {
             warnings.add("No se pudo leer " + composeName + ".");
         }
     }
 
-    private void addComposeService(String composeFile, String serviceName, String image,
+    private void addComposeService(String composeFile, String serviceName, String image, List<String> dependsOn,
             List<Map<String, Object>> services, List<Map<String, Object>> databases) {
         String imageName = image == null ? null : image.substring(image.lastIndexOf('/') + 1);
         String type = imageName == null ? "SERVICE" : "CONTAINER";
-        services.add(service(serviceName, type, sanitizeImage(image), composeFile));
+        Map<String, Object> component = service(serviceName, type, sanitizeImage(image), composeFile);
+        component.put("dependsOn", dependsOn);
+        services.add(component);
         Matcher databaseMatch = DATABASE_IMAGE.matcher((serviceName + " " + (imageName == null ? "" : imageName)));
         if (databaseMatch.find()) {
             databases.add(database(
@@ -1069,16 +1058,7 @@ public class ProjectArchitecturePlugin implements TechnologyPlugin {
     }
 
     private String readFile(Path file, String label, List<String> warnings) {
-        try {
-            if (Files.size(file) > MAX_TEXT_FILE_BYTES) {
-                warnings.add("Se omitió " + label + " porque supera el tamaño máximo de lectura.");
-                return "";
-            }
-            return Files.readString(file);
-        } catch (IOException e) {
-            warnings.add("No se pudo leer " + label + ".");
-            return "";
-        }
+        return ProjectFileReader.read(file, MAX_TEXT_FILE_BYTES, label, warnings);
     }
 
     private String readSibling(Path root, String relative, List<String> warnings) {

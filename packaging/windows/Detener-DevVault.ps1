@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Continue"
 
 $packageRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $composeFile = Join-Path $packageRoot "compose.preview.yml"
@@ -19,9 +19,12 @@ if (Test-Path $pidFile) {
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 
+if (-not $env:DEVVAULT_DB_URL) {
 docker compose -p devvault-preview -f $composeFile stop postgres
 if ($LASTEXITCODE -eq 0) {
     Write-Host "PostgreSQL detenido. Los datos permanecen guardados para el próximo inicio."
 } else {
     Write-Host "No se pudo detener PostgreSQL. Si Docker Desktop está cerrado, puedes ignorar este mensaje."
+}
+
 }

@@ -117,5 +117,44 @@ reinicia ni repara proyectos automáticamente.
   DevVault no lo cerrará por ti.
 
 DevVault es una aplicación local, sin autenticación, y no debe exponerse a
-redes no confiables. La sección **Settings** todavía no está disponible en
-esta beta.
+redes no confiables.
+
+## 7. Ajustes y diagnóstico
+
+En **Settings / Ajustes** puedes elegir editor, frecuencia de métricas y apertura
+automática de la aplicación. Estas preferencias se guardan en el navegador.
+Los detectores de escaneo se habilitan en el servidor; vuelve a escanear para
+actualizar los proyectos. La misma pantalla permite comprobar API y base de datos.
+
+El detalle de un proyecto reúne servicios, puertos en conflicto, requisitos de
+arranque y enlaces a logs. El mapa conserva relaciones detectadas en archivos;
+añade estado y puerto cuando un servicio coincide por nombre exacto con el runtime.
+Esto no significa que se haya observado tráfico entre componentes.
+
+## 8. Entornos reutilizables
+
+Abre **Entornos**, elige un workspace y selecciona los proyectos habituales.
+Declara qué proyectos deben estar listos antes de cada uno y guarda el entorno.
+Se rechazan ciclos y dependencias fuera del grupo. Los proyectos independientes
+se inician en paralelo, hasta cuatro a la vez. La detención sigue el orden inverso.
+
+Si un paso falla, los pasos posteriores se omiten. Revisa el diagnóstico y pulsa
+**Iniciar / reintentar**: los proyectos ya activos se conservan. Una sola operación
+de entorno puede ejecutarse a la vez. El historial persiste al reiniciar DevVault;
+las operaciones interrumpidas quedan señaladas para revisión, sin reanudación automática.
+Eliminar una definición borra su historial, pero no detiene sus proyectos ni borra archivos.
+
+## 9. Avisos de automatización
+
+La acción **NOTIFY** crea un aviso visible en DevVault y una alerta consultable en
+Monitoring. **LOG** escribe en el registro del backend. Los mensajes sustituyen
+campos como `#{projectId}` y `#{reason}` literalmente. Las condiciones permiten
+comparaciones como `#reason == 'puerto ocupado'`; no ejecutan métodos, constructores
+ni referencias a clases. Revisa las reglas anteriores que usaran esas operaciones.
+
+## 10. PostgreSQL existente
+
+Los paquetes aceptan `DEVVAULT_DB_URL`, `DEVVAULT_DB_USERNAME` y
+`DEVVAULT_DB_PASSWORD`. Cuando configuras una base existente, los lanzadores no
+requieren Docker para la base de DevVault ni detienen esa base al cerrar.
+Los proyectos que utilizan Docker Compose siguen necesitando Docker.

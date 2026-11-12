@@ -3,11 +3,15 @@ package com.devvault.discovery;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import com.devvault.discovery.application.ProjectIntelligenceService;
 import com.devvault.discovery.application.dto.ProjectIntelligenceResponse;
@@ -15,6 +19,7 @@ import com.devvault.discovery.domain.Project;
 import com.devvault.discovery.domain.ProjectProfile;
 import com.devvault.discovery.domain.ProjectStatus;
 import com.devvault.discovery.plugin.TechnologyEvidence;
+import com.devvault.discovery.plugin.ProjectArchitecturePlugin;
 
 class ProjectIntelligenceServiceTest {
 
@@ -106,5 +111,46 @@ class ProjectIntelligenceServiceTest {
         assertTrue(result.tools().stream().anyMatch(value -> value.name().equals("Maven")));
         assertTrue(result.map().nodes().stream().anyMatch(node -> node.type().equals("MODULE")));
         assertTrue(result.map().nodes().stream().anyMatch(node -> node.type().equals("DATABASE")));
+        assertTrue(result.map().edges().stream().anyMatch(edge ->
+                edge.source().equals(result.modules().get(0).id())
+                        && edge.target().equals(result.dependencies().get(0).id())
+                        && edge.relationship().equals("declares")));
+    }
+
+    @Test
+    void infersLayersFromSourceFoldersAndConnectsDeclaredComposeServices(@TempDir Path root) throws IOException {
+        Files.writeString(root.resolve("go.mod"), "module example.com/app\n");
+        for (String area : List.of("domain", "application", "infrastructure")) {
+            Files.createDirectories(root.resolve("src/main/java/com/example/feature").resolve(area));
+        }
+        Files.writeString(root.resolve("compose.yml"), """
+                services:
+                  api:
+                    depends_on:
+                      db:
+                        condition: service_started
+                  db:
+                    image: postgres:16
+                  worker:
+                    depends_on: [db, missing]
+                """);
+        var detection = new ProjectArchitecturePlugin().detect(root).orElseThrow();
+        var profile = new ProjectProfile(UUID.randomUUID(), detection.rawMarkers());
+        var project = new Project(UUID.randomUUID(), "app", root.toString(), "Go", null, null, ProjectStatus.ACTIVE);
+
+        var result = service.describe(project, profile);
+
+        assertEquals(List.of("LAYERED"), result.architecturePatterns().stream().map(
+                ProjectIntelligenceResponse.ArchitecturePattern::type).toList());
+        var pattern = result.architecturePatterns().get(0);
+        assertEquals("INFERRED", pattern.confidence());
+        assertEquals("src/main/java/com/example/feature", pattern.scope());
+        assertEquals(3, pattern.evidence().size());
+        var relations = result.map().edges().stream().filter(edge -> edge.relationship().equals("depends-on")).toList();
+        assertEquals(2, relations.size());
+        assertTrue(relations.stream().allMatch(edge -> edge.confidence().equals("DIRECT")
+                && edge.evidence().get(0).value().equals("db")));
+        assertTrue(relations.stream().anyMatch(edge ->
+                edge.evidence().get(0).property().equals("services.api.depends_on")));
     }
 }

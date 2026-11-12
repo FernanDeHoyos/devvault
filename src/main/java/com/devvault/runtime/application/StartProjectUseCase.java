@@ -4,7 +4,6 @@ import com.devvault.discovery.application.ProjectLookupService;
 import com.devvault.runtime.domain.Container;
 import com.devvault.runtime.domain.RuntimeInstance;
 import com.devvault.runtime.domain.RuntimeStatus;
-import com.devvault.discovery.plugin.TechnologyPlugin;
 import com.devvault.discovery.plugin.RunConfiguration;
 import com.devvault.shared.api.exception.ApiException;
 import com.devvault.runtime.domain.event.ProjectFailedEvent;
@@ -51,10 +50,8 @@ public class StartProjectUseCase {
     private final LocalProcessLogHub localProcessLogHub;
     private final LocalProcessManager localProcessManager;
     private final LocalProcessHealthProbe localProcessHealthProbe;
-    private final ProjectRunRecipeLoader projectRunRecipeLoader;
+    private final LocalRunConfigurationResolver runConfigurationResolver;
     private final ApplicationEventPublisher eventPublisher;
-
-    private final List<TechnologyPlugin> technologyPlugins;
 
     /**
      * Suelo del tiempo de espera del arranque. El valor que declara el plugin
@@ -72,11 +69,10 @@ public class StartProjectUseCase {
             RuntimeInstanceRepository runtimeInstanceRepository,
             ServiceRepository serviceRepository,
             ContainerRepository containerRepository,
-            List<TechnologyPlugin> technologyPlugins,
             LocalProcessLogHub localProcessLogHub,
             LocalProcessManager localProcessManager,
             LocalProcessHealthProbe localProcessHealthProbe,
-            ProjectRunRecipeLoader projectRunRecipeLoader,
+            LocalRunConfigurationResolver runConfigurationResolver,
             ApplicationEventPublisher eventPublisher,
             @Value("${devvault.runtime.startup-timeout-seconds:300}") int baseStartupTimeoutSeconds) {
         this.projectLookupService = projectLookupService;
@@ -85,11 +81,10 @@ public class StartProjectUseCase {
         this.runtimeInstanceRepository = runtimeInstanceRepository;
         this.serviceRepository = serviceRepository;
         this.containerRepository = containerRepository;
-        this.technologyPlugins = technologyPlugins;
         this.localProcessLogHub = localProcessLogHub;
         this.localProcessManager = localProcessManager;
         this.localProcessHealthProbe = localProcessHealthProbe;
-        this.projectRunRecipeLoader = projectRunRecipeLoader;
+        this.runConfigurationResolver = runConfigurationResolver;
         this.eventPublisher = eventPublisher;
         this.baseStartupTimeoutSeconds = baseStartupTimeoutSeconds;
     }
@@ -102,6 +97,7 @@ public class StartProjectUseCase {
      */
     @Transactional
     public RuntimeInstance execute(UUID projectId) {
+        projectLookupService.lockRuntime(projectId);
 
         ProjectLookupService.ProjectSummary project = projectLookupService.findById(projectId)
                 .orElseThrow(() -> new ApiException(
@@ -158,14 +154,17 @@ public class StartProjectUseCase {
         Path projectPath = Path.of(project.path());
 
         try {
-            RunConfiguration configuration = projectRunRecipeLoader.load(projectPath)
-                    .orElseGet(() -> {
-                        TechnologyPlugin technologyPlugin = findPlugin(projectPath);
-                        return technologyPlugin.getRunConfiguration(projectPath)
-                                .orElseThrow(() -> new ApiException(
-                                        HttpStatus.UNPROCESSABLE_ENTITY,
-                                        "La tecnología detectada no tiene una configuración de ejecución local: " + projectPath));
-                    });
+            RunConfiguration configuration = runConfigurationResolver.resolve(projectPath);
+            ProcessBuilder processBuilder = new ProcessBuilder(configuration.command())
+                    .directory((configuration.workingDirectory() == null
+                            ? projectPath : configuration.workingDirectory()).toFile())
+                    .redirectErrorStream(true);
+            processBuilder.environment().putAll(configuration.environment());
+            List<String> missing = configuration.missingEnvironment(processBuilder.environment());
+            if (!missing.isEmpty()) {
+                throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "Faltan variables de entorno: " + String.join(", ", missing));
+            }
 
             // 1. Persistimos el Service PRIMERO — necesitamos su id antes de
             // arrancar el proceso, porque el log hub se indexa por serviceId.
@@ -174,12 +173,6 @@ public class StartProjectUseCase {
             Service savedService = serviceRepository.save(service);
 
             log.info(">>> Ejecutando proyecto local {} con comando: {}", projectId, configuration.command());
-
-            ProcessBuilder processBuilder = new ProcessBuilder(configuration.command())
-                    .directory((configuration.workingDirectory() == null
-                            ? projectPath : configuration.workingDirectory()).toFile())
-                    .redirectErrorStream(true);
-            processBuilder.environment().putAll(configuration.environment());
 
             Process process = processBuilder.start();
             localProcessManager.register(projectId, process);
@@ -462,24 +455,6 @@ public class StartProjectUseCase {
                 return p.getPublicPort();
         }
         return null;
-    }
-
-    /**
-     * Busca el plugin de tecnología para el proyecto.
-     * 
-     * @param projectPath Path del proyecto
-     * @return Plugin de tecnología
-     */
-    private TechnologyPlugin findPlugin(Path projectPath) {
-
-        return technologyPlugins.stream()
-                .sorted(java.util.Comparator.comparingInt(TechnologyPlugin::detectionPriority).reversed())
-                .filter(plugin -> plugin.detect(projectPath).isPresent())
-                .findFirst()
-                .orElseThrow(() -> new ApiException(
-                        HttpStatus.UNPROCESSABLE_ENTITY,
-                        "No se pudo determinar la tecnología del proyecto: "
-                                + projectPath));
     }
 
     /**

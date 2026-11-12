@@ -2,6 +2,7 @@ package com.devvault.discovery.application.dto;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public record ProjectIntelligenceResponse(
@@ -15,6 +16,8 @@ public record ProjectIntelligenceResponse(
         List<Configuration> configurations,
         List<ServiceComponent> services,
         ProjectMap map,
+        List<ArchitecturePattern> architecturePatterns,
+        Map<String, List<String>> environmentVariables,
         List<String> warnings) {
 
     public record Technology(
@@ -28,6 +31,9 @@ public record ProjectIntelligenceResponse(
     }
 
     public record Evidence(String file, String property, String value) {
+    }
+
+    public record ArchitecturePattern(String type, String scope, String confidence, List<Evidence> evidence) {
     }
 
     public record Module(String id, String name, String path, String type, Evidence evidence) {
@@ -51,7 +57,8 @@ public record ProjectIntelligenceResponse(
     public record Configuration(String id, String file, String purpose) {
     }
 
-    public record ServiceComponent(String id, String name, String type, String image, Evidence evidence) {
+    public record ServiceComponent(
+            String id, String name, String type, String image, Evidence evidence, List<String> dependsOn) {
     }
 
     public record ProjectMap(List<Node> nodes, List<Edge> edges) {

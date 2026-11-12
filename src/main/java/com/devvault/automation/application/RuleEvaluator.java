@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
-import org.springframework.expression.spel.support.StandardEvaluationContext;
+import org.springframework.expression.spel.support.SimpleEvaluationContext;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -90,7 +90,7 @@ public class RuleEvaluator {
             return true; // sin condiciones = siempre aplica
         }
 
-        StandardEvaluationContext evalContext = new StandardEvaluationContext();
+        var evalContext = SimpleEvaluationContext.forReadOnlyDataBinding().build();
         eventContext.forEach(evalContext::setVariable);
 
         return conditions.stream().allMatch(condition -> {

@@ -1,5 +1,6 @@
 package com.devvault.plugin.api;
 
+import com.devvault.discovery.plugin.TechnologyPluginCatalog;
 import com.devvault.plugin.application.dto.PluginResponse;
 import com.devvault.plugin.application.dto.UpdatePluginRequest;
 import com.devvault.plugin.domain.PluginDescriptor;
@@ -19,13 +20,16 @@ import java.util.UUID;
 public class PluginController {
 
     private final PluginDescriptorRepository repository;
+    private final TechnologyPluginCatalog catalog;
 
     /**
      * Constructor del controlador de plugins.
      * @param repository Repositorio de plugins
+     * @param catalog Catálogo de plugins disponibles
      */
-    public PluginController(PluginDescriptorRepository repository) {
+    public PluginController(PluginDescriptorRepository repository, TechnologyPluginCatalog catalog) {
         this.repository = repository;
+        this.catalog = catalog;
     }
 
     /**
@@ -34,7 +38,10 @@ public class PluginController {
      */
     @GetMapping
     public List<PluginResponse> findAll() {
-        return repository.findAll().stream().map(PluginResponse::from).toList();
+        return repository.findAll().stream()
+                .filter(plugin -> catalog.contains(plugin.getName()))
+                .map(PluginResponse::from)
+                .toList();
     }
 
     /**
@@ -46,6 +53,7 @@ public class PluginController {
     @PatchMapping("/{id}")
     public PluginResponse update(@PathVariable("id") UUID id, @RequestBody UpdatePluginRequest request) {
         PluginDescriptor descriptor = repository.findById(id)
+                .filter(plugin -> catalog.contains(plugin.getName()))
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Plugin no encontrado: " + id));
 
         if (request.enabled() != null) {

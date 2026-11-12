@@ -3,6 +3,7 @@ package com.devvault.shared.config;
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
+import java.net.URI;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -66,7 +67,7 @@ public class SameOriginFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
 
         String origin = request.getHeader("Origin");
-        if (origin == null || origin.isBlank() || isAllowed(request, origin)) {
+        if (isLocalHost(request) && (origin == null || origin.isBlank() || isAllowed(request, origin))) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -102,5 +103,21 @@ public class SameOriginFilter extends OncePerRequestFilter {
             return false;
         }
         return origin.equals(request.getScheme() + "://" + host);
+    }
+
+    private boolean isLocalHost(HttpServletRequest request) {
+        String authority = request.getHeader("Host");
+        if (authority == null || authority.isBlank()) return false;
+        try {
+            URI uri = URI.create("http://" + authority);
+            String host = uri.getHost();
+            return uri.getRawUserInfo() == null && uri.getRawQuery() == null
+                    && uri.getRawFragment() == null && uri.getRawPath().isEmpty()
+                    && uri.getPort() >= -1 && uri.getPort() <= 65535
+                    && ("localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)
+                        || "[::1]".equals(host));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 }

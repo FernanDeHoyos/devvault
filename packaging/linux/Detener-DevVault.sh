@@ -27,6 +27,9 @@ if [[ -f "$pid_file" ]]; then
   rm -f "$pid_file"
 fi
 
+if [[ -z "${DEVVAULT_DB_URL:-}" ]]; then
 docker compose -p devvault-preview -f "$compose_file" stop postgres \
   && printf 'PostgreSQL detenido; sus datos permanecen guardados.\n' \
   || printf 'No se pudo detener PostgreSQL. Si Docker está cerrado, puedes ignorar este mensaje.\n' >&2
+
+fi

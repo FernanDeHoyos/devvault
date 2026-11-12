@@ -50,13 +50,31 @@ public class ProjectRunRecipeLoader {
             Map<String, String> environment = readEnvironment(service.path("environment"));
             String healthCheckUrl = readHealthCheckUrl(service.path("healthCheckUrl"));
             return Optional.of(new RunConfiguration(name, command, port, timeout,
-                    workingDirectory, environment, healthCheckUrl));
+                    workingDirectory, environment, healthCheckUrl, readRequiredEnvironment(service)));
         } catch (ApiException e) {
             throw e;
         } catch (IOException | RuntimeException e) {
             if (e instanceof ApiException apiException) throw apiException;
             throw invalid("No se pudo leer " + FILE_NAME + ": " + e.getMessage());
         }
+    }
+
+    private List<String> readRequiredEnvironment(JsonNode service) {
+        JsonNode names = service.path("requiredEnvironment");
+        if (names.isMissingNode()) {
+            return List.of();
+        }
+        if (!names.isArray()) {
+            throw invalid("service.requiredEnvironment debe ser una lista de nombres de variables.");
+        }
+        List<String> required = new ArrayList<>();
+        for (JsonNode name : names) {
+            if (!name.isTextual() || !name.asText().matches("[A-Za-z_][A-Za-z0-9_]*")) {
+                throw invalid("service.requiredEnvironment contiene un nombre de variable inválido.");
+            }
+            required.add(name.asText());
+        }
+        return required.stream().distinct().toList();
     }
 
     private List<String> commandForCurrentPlatform(JsonNode service) {

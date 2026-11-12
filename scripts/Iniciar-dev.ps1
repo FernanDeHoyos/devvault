@@ -48,7 +48,7 @@
 [CmdletBinding()]
 param(
     [int]$Port = 8080,
-    [string]$UiDistPath = (Join-Path $PSScriptRoot "..\ui\dist"),
+    [string]$UiDistPath,
     [switch]$NoBrowser,
     [switch]$Reuse
 )
@@ -56,7 +56,19 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$backendRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$scriptPath = $PSCommandPath
+if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+    $scriptPath = $MyInvocation.MyCommand.Path
+}
+if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+    throw "No se pudo determinar la ubicacion de Iniciar-dev.ps1. Ejecuta el archivo directamente o usa Iniciar-DevVault.bat."
+}
+
+$scriptDirectory = Split-Path -Parent $scriptPath
+$backendRoot = (Resolve-Path (Join-Path $scriptDirectory "..")).Path
+if ([string]::IsNullOrWhiteSpace($UiDistPath)) {
+    $UiDistPath = Join-Path $backendRoot "ui\dist"
+}
 $dataRoot = Join-Path $env:LOCALAPPDATA "DevVault\dev"
 $pidFile = Join-Path $dataRoot "backend.pid"
 $stdoutLog = Join-Path $dataRoot "backend.out.log"
@@ -179,7 +191,7 @@ Step "PostgreSQL acepta conexiones en el puerto 5433"
 # el backend funciona igual pero sin interfaz, y avisamos.
 
 $embedUi = $false
-$uiRoot = (Resolve-Path (Join-Path $PSScriptRoot "..") | Join-Path -ChildPath "ui")
+$uiRoot = Join-Path $backendRoot "ui"
 if (Test-Path (Join-Path $UiDistPath "index.html")) {
     $embedUi = $true
     Step "UI encontrada en $UiDistPath"

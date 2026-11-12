@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "community.go",
+  "match": {
+    "allFiles": ["go.mod"]
+  },
+  "result": {
+    "language": "Go",
+    "technologies": [
+      {"name": "Go Modules", "category": "TOOLS"}
+    ]
+  }
+}

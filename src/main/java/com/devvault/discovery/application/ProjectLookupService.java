@@ -35,6 +35,18 @@ public class ProjectLookupService {
                 .map(p -> new ProjectSummary(p.getId(), p.getName(), p.getPath()));
     }
 
+    /** Held until the caller's transaction completes, including process readiness and persistence. */
+    @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void lockRuntime(UUID projectId) {
+        try {
+            projectRepository.lockForRuntime(projectId).orElseThrow(() ->
+                    new com.devvault.shared.api.exception.ApiException(org.springframework.http.HttpStatus.NOT_FOUND, "Proyecto no encontrado."));
+        } catch (org.springframework.dao.PessimisticLockingFailureException e) {
+            throw new com.devvault.shared.api.exception.ApiException(org.springframework.http.HttpStatus.CONFLICT,
+                    "Ya hay una operación de inicio, detención o borrado en curso para este proyecto.");
+        }
+    }
+
     /**
      * IDs de los proyectos que pertenecen a un Workspace.
      *

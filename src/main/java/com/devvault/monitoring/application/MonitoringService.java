@@ -97,18 +97,15 @@ public class MonitoringService {
             return null;
         }
 
-        Statistics previousStats = dockerClientAdapter.readStats(container.getDockerContainerId());
-        if (previousStats != null) {
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.debug("Muestra de CPU interrumpida para el contenedor {}", container.getDockerContainerId());
-                return null;
-            }
-        }
         Statistics stats = dockerClientAdapter.readStats(container.getDockerContainerId());
         if (stats == null || stats.getMemoryStats() == null || stats.getMemoryStats().getUsage() == null) return null;
+        Statistics previousStats;
+        synchronized (previousDockerSamples) {
+            previousStats = previousDockerSamples.put(container.getDockerContainerId(), stats);
+            while (previousDockerSamples.size() > 512) {
+                previousDockerSamples.remove(previousDockerSamples.keySet().iterator().next());
+            }
+        }
         return new ContainerMetricsResponse(service.getId(), service.getName(), "DOCKER", container.getDockerContainerId(),
                 null, previousStats == null ? null : cpuPercent(stats, previousStats),
                 stats.getMemoryStats().getUsage() / (1024.0 * 1024.0), Instant.now());
@@ -129,4 +126,6 @@ public class MonitoringService {
         long cores = current.getCpuStats().getOnlineCpus() == null ? 1 : current.getCpuStats().getOnlineCpus();
         return cpuDelta * 100.0 / systemDelta * cores;
     }
+
+    private final java.util.Map<String, Statistics> previousDockerSamples = new java.util.LinkedHashMap<>();
 }

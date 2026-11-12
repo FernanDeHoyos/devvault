@@ -39,6 +39,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+	implementation 'org.yaml:snakeyaml'
 	// Nota: spring-boot-starter-security y oauth2-resource-server se retiraron
 	// junto con el modulo de autenticacion. El acceso queda protegido por el
 	// bind a 127.0.0.1 y por SameOriginFilter.
@@ -67,6 +68,9 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// Optional compatibility override for Docker engines with a newer minimum API.
+	def dockerApiVersion = providers.environmentVariable('DOCKER_API_VERSION')
+	if (dockerApiVersion.isPresent()) systemProperty 'api.version', dockerApiVersion.get()
 }
 
 // The Windows preview can embed the separately built React UI in the Boot JAR.

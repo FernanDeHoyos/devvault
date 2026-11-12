@@ -14,8 +14,9 @@ app_url="http://localhost:${DEVVAULT_PREVIEW_PORT:-5050}/"
 
 fail() { printf '\nDevVault: %s\n' "$1" >&2; exit 1; }
 
+command -v curl >/dev/null 2>&1 || fail 'No se encontró curl.'
+if [[ -z "${DEVVAULT_DB_URL:-}" ]]; then
 command -v docker >/dev/null 2>&1 || fail "No se encontró Docker. Instala Docker Engine con Docker Compose plugin."
-command -v curl >/dev/null 2>&1 || fail "No se encontró curl, necesario para comprobar el estado de DevVault."
 docker info >/dev/null 2>&1 || fail "Docker no responde. Inicia Docker Engine y vuelve a intentar."
 docker compose -p devvault-preview -f "$compose_file" up -d postgres \
   || fail "No se pudo iniciar PostgreSQL. Comprueba que el puerto 5434 esté disponible."
@@ -29,6 +30,8 @@ for _ in {1..30}; do
   sleep 2
 done
 $database_ready || fail "PostgreSQL no quedó listo; revisa el estado del contenedor."
+
+fi
 
 if curl --fail --silent --show-error --max-time 2 "$api_base_url/api/v1/health" >/dev/null 2>&1; then
   command -v xdg-open >/dev/null 2>&1 && xdg-open "$app_url" >/dev/null 2>&1 || true

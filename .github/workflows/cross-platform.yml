@@ -14,6 +14,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      DOCKER_API_VERSION: '1.44'
     steps:
       - name: Checkout including UI submodule
         uses: actions/checkout@v4
@@ -37,6 +39,10 @@ jobs:
         if: runner.os == 'Linux'
         run: ./gradlew test --no-daemon
 
+      - name: Require real database integration coverage (Linux)
+        if: runner.os == 'Linux'
+        run: python3 scripts/check-test-results.py build/test-results/test
+
       - name: Test backend (Windows)
         if: runner.os == 'Windows'
         run: .\gradlew.bat test --no-daemon
@@ -50,6 +56,22 @@ jobs:
         run: |
           npm run lint
           npm run build
+
+      - name: Install browser for UI journeys
+        working-directory: ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Test UI journeys with API fixtures
+        working-directory: ui
+        run: npm test
+
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence-${{ matrix.os }}
+          path: ui/test-results
+          retention-days: 7
 
       - name: Build backend with embedded UI (Linux)
         if: runner.os == 'Linux'

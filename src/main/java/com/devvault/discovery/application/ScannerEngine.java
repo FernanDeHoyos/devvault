@@ -2,6 +2,7 @@ package com.devvault.discovery.application;
 
 import com.devvault.discovery.plugin.DetectionResult;
 import com.devvault.discovery.plugin.TechnologyPlugin;
+import com.devvault.discovery.plugin.TechnologyPluginCatalog;
 import com.devvault.plugin.infrastructure.PluginDescriptorRepository;
 
 import java.io.IOException;
@@ -24,7 +25,7 @@ import org.springframework.stereotype.Component;
 /**
  * Recorre recursivamente un Workspace, poda carpetas técnicas irrelevantes
  * (RF-07, RNF-02) y delega la detección de tecnología a cada TechnologyPlugin
- * registrado en el contexto de Spring que además esté HABILITADO en
+ * disponible en el catálogo que además esté HABILITADO en
  * plugin_descriptors (Plugin System, v0.3).
  */
 @Component
@@ -54,13 +55,12 @@ public class ScannerEngine {
         ".nuxt",
         "vendor");
 
-    // Inyección de dependencias de los plugins de tecnología
     private final List<TechnologyPlugin> plugins;
     private final PluginDescriptorRepository pluginDescriptorRepository;
 
 
-    public ScannerEngine(List<TechnologyPlugin> plugins, PluginDescriptorRepository pluginDescriptorRepository) {
-        this.plugins = plugins;
+    public ScannerEngine(TechnologyPluginCatalog catalog, PluginDescriptorRepository pluginDescriptorRepository) {
+        this.plugins = catalog.detectors();
         this.pluginDescriptorRepository = pluginDescriptorRepository;
     }
 
@@ -105,7 +105,13 @@ public class ScannerEngine {
             throw new RuntimeException("Error recorriendo el Workspace: " + root, e);
         }
  
-        return results;
+        return results.stream().map(project -> {
+            DetectionResult detection = project.detectionResult();
+            Map<String, Object> markers = new LinkedHashMap<>(detection.rawMarkers());
+            markers.put("environmentVariables", EnvironmentVariableScanner.scan(project.path(), IGNORED_DIRS));
+            return new ScannedProject(project.path(),
+                    new DetectionResult(detection.language(), detection.framework(), detection.version(), markers));
+        }).toList();
     }
 
     /**

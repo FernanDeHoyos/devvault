@@ -175,7 +175,7 @@ server.listen(3000, "127.0.0.1", () => console.log("DevVault Node smoke listenin
     $cssAsset = [regex]::Match($page.Content, 'href="([^"]+\.css)"').Groups[1].Value
     if (-not $jsAsset -or -not $cssAsset) { throw "La portada no declara los assets JS y CSS." }
     $javascript = Invoke-WebRequest -Uri "$baseUrl$jsAsset" -TimeoutSec 10 -UseBasicParsing
-    if ($javascript.Content -notmatch "Stack tecnológico y mapa") {
+    if ($javascript.Content -notmatch "Arquitectura del proyecto") {
         throw "El bundle servido no contiene el panel de inteligencia del proyecto. Reconstruye el JAR con la UI actualizada."
     }
     $hasArchitectureInventory = $javascript.Content -match "Dependencias declaradas" `
@@ -225,7 +225,8 @@ server.listen(3000, "127.0.0.1", () => console.log("DevVault Node smoke listenin
     if (-not (@($intelligence.services | Where-Object { $_.name -eq "db" }))) {
         throw "El endpoint de inteligencia no devolvió el servicio Compose de prueba."
     }
-    $started = Invoke-RestMethod -Uri "$baseUrl/api/v1/projects/$($project[0].id)/start" -Method Post -TimeoutSec 10
+    # The API waits for readiness (up to 300 s); the HTTP client must not cancel it after 10 s.
+    $started = Invoke-RestMethod -Uri "$baseUrl/api/v1/projects/$($project[0].id)/start" -Method Post -TimeoutSec 330
     if ($started.overallStatus -ne "RUNNING") { throw "El proyecto Node no inició: $($started.overallStatus)" }
     $nodeResponse = Invoke-WebRequest -Uri "http://127.0.0.1:3000/" -TimeoutSec 10 -UseBasicParsing
     $actualNodeBody = $nodeResponse.Content
@@ -248,12 +249,41 @@ server.listen(3000, "127.0.0.1", () => console.log("DevVault Node smoke listenin
         $probe.Dispose()
     }
 
+    Write-Host "Comprobando el entorno guardado con un proceso Node real..."
+    $environmentBody = @{
+        name = "Smoke environment"
+        projects = @(@{ projectId = $project[0].id; dependsOn = @() })
+    } | ConvertTo-Json -Depth 6 -Compress
+    $environmentBase = "$baseUrl/api/v1/workspaces/$workspaceId/environments"
+    $environment = Invoke-RestMethod -Uri $environmentBase -Method Post -ContentType "application/json" -Body $environmentBody -TimeoutSec 10
+    foreach ($operation in @("START", "STOP")) {
+        $operationBody = @{ operation = $operation } | ConvertTo-Json -Compress
+        $run = Invoke-RestMethod -Uri "$environmentBase/$($environment.id)/runs" -Method Post -ContentType "application/json" -Body $operationBody -TimeoutSec 10
+        for ($attempt = 0; $attempt -lt 660; $attempt++) {
+            Start-Sleep -Milliseconds 500
+            $history = Invoke-RestMethod -Uri "$environmentBase/$($environment.id)/runs" -TimeoutSec 10
+            $finishedRun = $history | Where-Object { $_.id -eq $run.id } | Select-Object -First 1
+            if ($finishedRun -and $finishedRun.status -ne "RUNNING") { break }
+        }
+        if (-not $finishedRun -or $finishedRun.status -ne "COMPLETED") {
+            $details = $finishedRun | ConvertTo-Json -Depth 6 -Compress
+            throw "La operación $operation del entorno no terminó correctamente: $details"
+        }
+        if ($operation -eq "START") {
+            [void](Invoke-WebRequest -Uri "http://127.0.0.1:3000/" -TimeoutSec 5 -UseBasicParsing)
+        }
+    }
+
     Write-Host "5/7 Reiniciando el backend y verificando persistencia..."
     Stop-Backend $process
     $process = Start-Backend
     Wait-Backend $process
     $saved = Invoke-RestMethod -Uri "$baseUrl/api/v1/workspaces/$workspaceId" -TimeoutSec 10
     if ($saved.path -ne $workspacePath) { throw "El workspace no persistió tras reiniciar el backend." }
+    $savedEnvironments = Invoke-RestMethod -Uri $environmentBase -TimeoutSec 10
+    if (-not ($savedEnvironments | Where-Object { $_.id -eq $environment.id })) { throw "El entorno no persistió tras reiniciar." }
+    $savedRuns = Invoke-RestMethod -Uri "$environmentBase/$($environment.id)/runs" -TimeoutSec 10
+    if ($savedRuns.Count -ne 2) { throw "El historial del entorno no persistió tras reiniciar." }
 
     Write-Host "6/7 Borrando el registro y confirmando que la carpeta permanece..."
     Invoke-RestMethod -Uri "$baseUrl/api/v1/workspaces/$workspaceId" -Method Delete -TimeoutSec 10 | Out-Null
@@ -304,6 +334,12 @@ server.listen(3000, "127.0.0.1", () => console.log("DevVault Node smoke listenin
     $env:DEVVAULT_DB_USERNAME = $previousDbUsername
     $env:DEVVAULT_DB_PASSWORD = $previousDbPassword
     if (Test-Path -LiteralPath $workspacePath -PathType Container) {
+        $resolvedCleanup = [IO.Path]::GetFullPath($workspacePath)
+        $resolvedTempRoot = (Get-Item -LiteralPath $env:TEMP).FullName.TrimEnd('\') + '\'
+        if (-not $resolvedCleanup.StartsWith($resolvedTempRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            -not ([IO.Path]::GetFileName($resolvedCleanup).StartsWith('devvault-smoke-'))) {
+            throw "Se rechazó la limpieza de una ruta ajena al workspace temporal del smoke test."
+        }
         try { Remove-Item -LiteralPath $workspacePath -Recurse -Force -ErrorAction Stop } catch {
             Write-Host "Could not clean temporary workspace $workspacePath : $($_.Exception.Message)" -ForegroundColor Yellow
         }

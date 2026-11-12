@@ -24,6 +24,7 @@ class SameOriginFilterTest {
 
     private MockHttpServletResponse invoke(String path, String origin) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+        request.addHeader(HttpHeaders.HOST, "127.0.0.1:8080");
         if (origin != null) {
             request.addHeader(HttpHeaders.ORIGIN, origin);
         }
@@ -107,5 +108,19 @@ class SameOriginFilterTest {
                 org.junit.jupiter.api.Assertions.assertTrue(filter.shouldNotFilter(req)));
         assertTrue(filter.shouldNotFilter(new MockHttpServletRequest("GET", "/assets/index.js")));
         assertEquals(false, filter.shouldNotFilter(new MockHttpServletRequest("GET", "/api/v1/health")));
+    }
+
+    @Test
+    void rejectsForeignHostEvenWithMatchingOriginOrNoOrigin() throws Exception {
+        for (String host : new String[] {"attacker.example:8080", "localhost.attacker.example", "localhost@attacker.example", "127.0.0.1/path"}) {
+            for (boolean withOrigin : new boolean[] {true, false}) {
+                var request = new MockHttpServletRequest("POST", "/api/v1/projects");
+                request.addHeader(HttpHeaders.HOST, host);
+                if (withOrigin) request.addHeader(HttpHeaders.ORIGIN, "http://" + host);
+                var response = new MockHttpServletResponse();
+                filter.doFilter(request, response, (req, res) -> org.junit.jupiter.api.Assertions.fail("Foreign host accepted"));
+                assertEquals(403, response.getStatus());
+            }
+        }
     }
 }

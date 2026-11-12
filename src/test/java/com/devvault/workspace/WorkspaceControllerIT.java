@@ -31,6 +31,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers(disabledWithoutDocker = true)
 @AutoConfigureMockMvc
 class WorkspaceControllerIT {
+    @Autowired
+    private org.springframework.web.context.WebApplicationContext webContext;
+
+    @org.junit.jupiter.api.BeforeEach
+    void localHostHeader() {
+        mockMvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(webContext)
+                .addFilters(new com.devvault.shared.config.SameOriginFilter())
+                .defaultRequest(get("/").header("Host", "127.0.0.1:8080")).build();
+    }
 
 
     /** PostgreSQL container for integration testing 
@@ -230,6 +239,63 @@ class WorkspaceControllerIT {
      * @return el id del Workspace recién creado
      * @throws Exception
      */
+    @Autowired
+    private com.devvault.discovery.infraestructure.ProjectRepository projectRepository;
+
+    @Autowired
+    private com.devvault.discovery.application.ProjectLookupService projectLookup;
+    @Autowired
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    @Test
+    @org.junit.jupiter.api.Timeout(25)
+    void rejectsConcurrentLifecycleOperationsUntilCommit(@TempDir Path folder) throws Exception {
+        UUID workspace = UUID.fromString(createWorkspaceAndReturnId("Lifecycle locking", folder.toString()));
+        var project = projectRepository.save(new com.devvault.discovery.domain.Project(workspace, "api", folder.toString(), "Java", null, null, com.devvault.discovery.domain.ProjectStatus.ACTIVE));
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        var acquired = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            var holding = executor.submit(() -> transaction.executeWithoutResult(status -> {
+                projectLookup.lockRuntime(project.getId());
+                acquired.countDown();
+                try { release.await(15, java.util.concurrent.TimeUnit.SECONDS); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }));
+            assertThat(acquired.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var conflict = org.junit.jupiter.api.Assertions.assertThrows(com.devvault.shared.api.exception.ApiException.class,
+                    () -> transaction.executeWithoutResult(status -> projectLookup.lockRuntime(project.getId())));
+            assertThat(conflict.getStatus()).isEqualTo(org.springframework.http.HttpStatus.CONFLICT);
+            release.countDown();
+            holding.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            transaction.executeWithoutResult(status -> projectLookup.lockRuntime(project.getId()));
+        } finally { release.countDown(); executor.shutdownNow(); }
+    }
+
+    @Test
+    void savedEnvironmentPersistsAndRecordsStopWithoutDeletingFiles(@TempDir Path folder) throws Exception {
+        UUID workspace = UUID.fromString(createWorkspaceAndReturnId("Entorno persistente", folder.toString()));
+        var project = projectRepository.save(new com.devvault.discovery.domain.Project(workspace, "api", folder.toString(), "Java", null, null, com.devvault.discovery.domain.ProjectStatus.ACTIVE));
+        String base = "/api/v1/workspaces/" + workspace + "/environments";
+        String body = objectMapper.writeValueAsString(java.util.Map.of("name", "Trabajo", "projects", java.util.List.of(java.util.Map.of("projectId", project.getId(), "dependsOn", java.util.List.of()))));
+        String response = mockMvc.perform(post(base).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String id = objectMapper.readTree(response).get("id").asText();
+        mockMvc.perform(get(base)).andExpect(status().isOk()).andExpect(jsonPath("$[0].name").value("Trabajo"));
+        mockMvc.perform(post(base + "/" + id + "/runs").contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"STOP\"}"))
+                .andExpect(status().isAccepted());
+        String state = "RUNNING";
+        for (int attempt = 0; attempt < 50 && state.equals("RUNNING"); attempt++) {
+            Thread.sleep(100);
+            var report = mockMvc.perform(get(base + "/" + id + "/runs")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            state = objectMapper.readTree(report).get(0).get("status").asText();
+        }
+        assertThat(state).isEqualTo("COMPLETED");
+        mockMvc.perform(delete("/api/v1/workspaces/" + workspace)).andExpect(status().isNoContent());
+        assertThat(folder).exists();
+    }
+
     private String createWorkspaceAndReturnId(String nombre, String path) throws Exception {
         CreatedWorkspaceRequest request = new CreatedWorkspaceRequest(nombre, path);
         String json = mockMvc.perform(post("/api/v1/workspaces")

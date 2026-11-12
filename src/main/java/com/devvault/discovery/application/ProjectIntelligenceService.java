@@ -1,14 +1,18 @@
 package com.devvault.discovery.application;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
 import com.devvault.discovery.application.dto.ProjectIntelligenceResponse;
+import com.devvault.discovery.application.dto.ProjectIntelligenceResponse.ArchitecturePattern;
 import com.devvault.discovery.application.dto.ProjectIntelligenceResponse.Configuration;
 import com.devvault.discovery.application.dto.ProjectIntelligenceResponse.Database;
 import com.devvault.discovery.application.dto.ProjectIntelligenceResponse.Dependency;
@@ -122,8 +126,113 @@ public class ProjectIntelligenceService {
                 tools,
                 configurations,
                 services,
-                new ProjectMap(List.copyOf(nodes), List.copyOf(edges)),
+                new ProjectMap(List.copyOf(nodes), connectComponents(nodes, edges, modules, services)),
+                classifyArchitecture(modules),
+                readEnvironmentVariables(markers.get("environmentVariables")),
                 readStringList(markers.get("warnings")));
+    }
+
+    private Map<String, List<String>> readEnvironmentVariables(Object raw) {
+        Map<String, List<String>> variables = new LinkedHashMap<>();
+        if (raw instanceof Map<?, ?> entries) {
+            entries.forEach((key, value) -> {
+                if (key instanceof String name) {
+                    variables.put(name, readStringList(value));
+                }
+            });
+        }
+        return variables;
+    }
+
+    private List<Edge> connectComponents(
+            List<Node> nodes, List<Edge> edges, List<Module> modules, List<ServiceComponent> services) {
+        Map<String, Node> nodesById = new LinkedHashMap<>();
+        nodes.forEach(node -> nodesById.put(node.id(), node));
+        Map<String, Module> modulesById = new LinkedHashMap<>();
+        modules.stream().filter(module -> nodesById.containsKey(module.id()))
+                .forEach(module -> modulesById.put(module.id(), module));
+        List<Module> owners = modulesById.values().stream()
+                .sorted(Comparator.comparingInt((Module module) -> module.path().length()).reversed())
+                .toList();
+
+        List<Edge> connected = new ArrayList<>(edges.stream().map(edge -> {
+            Node target = nodesById.get(edge.target());
+            String path = switch (target.type()) {
+                case "MODULE" -> modulesById.get(target.id()).path();
+                case "DEPENDENCY", "DATABASE", "TOOL", "CONFIGURATION", "SERVICE" ->
+                    edge.evidence().get(0).file();
+                default -> "";
+            };
+            return owners.stream().filter(module -> path != null && path.startsWith(module.path() + "/"))
+                    .findFirst()
+                    .map(owner -> new Edge("edge-" + owner.id() + "-" + edge.target(),
+                            owner.id(), edge.target(), edge.relationship(), edge.confidence(), edge.evidence()))
+                    .orElse(edge);
+        }).toList());
+
+        Map<String, Map<String, ServiceComponent>> servicesByFile = new LinkedHashMap<>();
+        services.stream().filter(service -> nodesById.containsKey(service.id())).forEach(service ->
+                servicesByFile.computeIfAbsent(service.evidence().file(), file -> new LinkedHashMap<>())
+                        .put(service.name(), service));
+        servicesByFile.forEach((file, byName) -> byName.values().forEach(service -> {
+            for (String dependency : service.dependsOn()) {
+                ServiceComponent target = byName.get(dependency);
+                if (target != null && !target.id().equals(service.id())) {
+                    addEdge(connected, service.id(), target.id(), "depends-on", "DIRECT",
+                            List.of(new Evidence(file, "services." + service.name() + ".depends_on", dependency)));
+                }
+            }
+        }));
+        return List.copyOf(connected);
+    }
+
+    private List<ArchitecturePattern> classifyArchitecture(List<Module> modules) {
+        Map<String, Map<String, Evidence>> areasByParent = new LinkedHashMap<>();
+        List<Evidence> buildModules = new ArrayList<>();
+        for (Module module : modules) {
+            if (!"SOURCE_AREA".equals(module.type())) {
+                if (Set.of("MAVEN_MODULE", "GRADLE_MODULE", "NPM_WORKSPACE", "BUILD_MODULE")
+                        .contains(module.type())) {
+                    buildModules.add(module.evidence());
+                }
+                continue;
+            }
+            int separator = module.path().lastIndexOf('/');
+            String parent = separator < 0 ? "." : module.path().substring(0, separator);
+            String area = module.name().toLowerCase(Locale.ROOT);
+            area = switch (area) {
+                case "controller" -> "controllers";
+                case "service" -> "services";
+                case "repository" -> "repositories";
+                case "infra" -> "infrastructure";
+                case "use-cases" -> "usecases";
+                default -> area;
+            };
+            areasByParent.computeIfAbsent(parent, ignored -> new LinkedHashMap<>()).put(area, module.evidence());
+        }
+
+        List<ArchitecturePattern> patterns = new ArrayList<>();
+        if (buildModules.size() >= 2) {
+            patterns.add(new ArchitecturePattern("MULTI_MODULE", ".", "DIRECT", List.copyOf(buildModules)));
+        }
+        areasByParent.forEach((scope, areas) -> {
+            if (areas.keySet().containsAll(List.of("ports", "adapters"))) {
+                patterns.add(pattern("HEXAGONAL", scope, areas, "ports", "adapters"));
+            } else if (areas.keySet().containsAll(List.of("entities", "usecases", "adapters"))) {
+                patterns.add(pattern("CLEAN", scope, areas, "entities", "usecases", "adapters"));
+            } else if (areas.keySet().containsAll(List.of("models", "views", "controllers"))) {
+                patterns.add(pattern("MVC", scope, areas, "models", "views", "controllers"));
+            } else if (areas.keySet().containsAll(List.of("domain", "application", "infrastructure"))) {
+                patterns.add(pattern("LAYERED", scope, areas, "domain", "application", "infrastructure"));
+            } else if (areas.keySet().containsAll(List.of("controllers", "services", "repositories"))) {
+                patterns.add(pattern("LAYERED", scope, areas, "controllers", "services", "repositories"));
+            }
+        });
+        return List.copyOf(patterns);
+    }
+
+    private ArchitecturePattern pattern(String type, String scope, Map<String, Evidence> areas, String... names) {
+        return new ArchitecturePattern(type, scope, "INFERRED", List.of(names).stream().map(areas::get).toList());
     }
 
     private void addEdge(List<Edge> edges, String source, String target, String relationship,
@@ -308,11 +417,12 @@ public class ProjectIntelligenceService {
                 continue;
             }
             values.add(new ServiceComponent(
-                    "service-" + idPart(name),
+                    "service-" + idPart(file + "/" + name),
                     name,
                     type,
                     stringValue(value.get("image")),
-                    new Evidence(file, "services." + name, stringValue(value.get("image")))));
+                    new Evidence(file, "services." + name, stringValue(value.get("image"))),
+                    readStringList(value.get("dependsOn"))));
         }
         return uniqueById(values, ServiceComponent::id);
     }

@@ -9,6 +9,11 @@ Backend de **DevVault**, una aplicación local para descubrir proyectos de desar
 - Detección de proyectos Spring Boot (Maven/Gradle), Node.js/React y PHP/Laravel.
 - Catálogo estático de rutas para Spring MVC, Laravel, Express, Fastify y NestJS.
 - Inicio y detención de proyectos locales o definidos con Docker Compose.
+- Diagnóstico antes de iniciar un proyecto. Comprueba ejecutables, puertos locales
+  declarados y disponibilidad de Docker Compose. Para exigir variables al iniciar
+  una receta local, incluye sus nombres en `service.requiredEnvironment`, por
+  ejemplo `["DATABASE_URL"]`. DevVault comprueba el entorno heredado y los valores
+  definidos en `service.environment`.
 - Recetas `devvault.run.json` versionables para personalizar el arranque local
   en Windows y Linux; ejemplo en `docs/devvault.run.example.json`.
 - Readiness HTTP configurable para recetas, limitado a endpoints de loopback.
@@ -45,8 +50,11 @@ sirve para confirmar que la descarga no se dañó ni fue modificada. Los archivo
 Extrae el paquete y ejecuta `Iniciar-DevVault.bat` en Windows o
 `./Iniciar-DevVault.sh` en Linux; usa los scripts `Detener-DevVault` para
 cerrarlo. Los paquetes incluyen Java 17 y la UI: no necesitas instalar Java ni
-Node para ejecutar DevVault. Sí necesitas Docker en funcionamiento para la base
-de datos PostgreSQL. Git, Node/npm y PHP/Composer solo hacen falta para las
+Node para ejecutar DevVault. Docker inicia PostgreSQL automáticamente; también
+puedes usar una base existente configurando `DEVVAULT_DB_URL`,
+`DEVVAULT_DB_USERNAME` y `DEVVAULT_DB_PASSWORD` antes de abrir el lanzador.
+En ese caso no se exige Docker para la base de DevVault.
+Git, Node/npm y PHP/Composer solo hacen falta para las
 funciones o proyectos que los utilicen.
 
 La aplicación escucha en loopback y no tiene autenticación. No la expongas a
@@ -78,6 +86,31 @@ Si el checksum no coincide, no uses el archivo y vuelve a descargarlo. Esta
 comprobación solo detecta diferencias en el archivo; no certifica que el
 programa esté libre de vulnerabilidades.
 </details>
+
+## Extensiones de escaneo
+
+Copia [el detector de Go](docs/extensions/go.json) a `~/.devvault/extensions/`
+(`%USERPROFILE%\.devvault\extensions\` en Windows), reinicia DevVault y vuelve
+a escanear el workspace. Puedes cambiar la carpeta con
+`DEVVAULT_EXTENSIONS_DIRECTORY`. La extensión queda habilitada al instalarla
+por primera vez. Consulta su identificador en `GET /api/v1/plugins` y cambia su
+estado con `PATCH /api/v1/plugins/{id}` y un cuerpo como `{"enabled": false}`.
+
+Cada archivo `.json` declara `schemaVersion: 1`, un `id` único como
+`community.go`, `match.allFiles` y `result.language`. Puedes incluir
+`result.framework` y `result.technologies`, una lista de objetos con `name`
+y `category` (`FRONTEND`, `BACKEND`, `DATABASE`, `INFRASTRUCTURE`, `TOOLS`
+o `LANGUAGE`). El detalle del proyecto muestra estos hallazgos con los archivos
+marcadores como evidencia. Todos los marcadores deben ser archivos regulares en la
+misma carpeta candidata. Usa nombres literales como `go.mod` o `Cargo.toml`.
+DevVault registra en el log las definiciones inválidas y los IDs duplicados.
+Los detectores integrados específicos tienen prioridad sobre estas extensiones
+y el escáner conserva los hallazgos de los demás detectores.
+
+Para retirar una extensión, quita su JSON y reinicia. Si reinstalas el mismo ID,
+DevVault recupera su estado de habilitación. Estas extensiones aportan detección.
+Para configurar el arranque local de un proyecto detectado, usa
+[`devvault.run.json`](docs/devvault.run.example.json).
 
 ## Stack
 

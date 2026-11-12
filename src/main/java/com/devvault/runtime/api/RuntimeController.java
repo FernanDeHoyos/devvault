@@ -1,6 +1,7 @@
 package com.devvault.runtime.api;
 
 import com.devvault.runtime.application.StartProjectUseCase;
+import com.devvault.runtime.application.StartupDiagnostics;
 import com.devvault.runtime.application.StopProjectUseCase;
 import com.devvault.runtime.application.dto.*;
 import com.devvault.runtime.domain.Container;
@@ -26,17 +27,25 @@ public class RuntimeController {
     private final RuntimeInstanceRepository runtimeInstanceRepository;
     private final ServiceRepository serviceRepository;
     private final ContainerRepository containerRepository;
+    private final StartupDiagnostics startupDiagnostics;
 
     public RuntimeController(StartProjectUseCase startProjectUseCase,
             StopProjectUseCase stopProjectUseCase,
             RuntimeInstanceRepository runtimeInstanceRepository,
             ServiceRepository serviceRepository,
-            ContainerRepository containerRepository) {
+            ContainerRepository containerRepository,
+            StartupDiagnostics startupDiagnostics) {
         this.startProjectUseCase = startProjectUseCase;
         this.stopProjectUseCase = stopProjectUseCase;
         this.runtimeInstanceRepository = runtimeInstanceRepository;
         this.serviceRepository = serviceRepository;
         this.containerRepository = containerRepository;
+        this.startupDiagnostics = startupDiagnostics;
+    }
+
+    @GetMapping("/startup-diagnostics")
+    public StartupDiagnostics.Report startupDiagnostics(@PathVariable("id") UUID id) {
+        return startupDiagnostics.inspect(id);
     }
 
     /**

@@ -56,7 +56,9 @@ public class StopProjectUseCase {
      * @param projectId ID del proyecto
      * @return Instancia del runtime
      */
+    @org.springframework.transaction.annotation.Transactional
     public RuntimeInstance execute(UUID projectId) {
+    projectLookupService.lockRuntime(projectId);
     // Obtenemos el proyecto
     ProjectLookupService.ProjectSummary project = projectLookupService.findById(projectId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Proyecto no encontrado: " + projectId));
@@ -156,7 +158,9 @@ public class StopProjectUseCase {
      * Stops any recorded local process or DevVault-managed Compose stack before
      * the project and its database records are deleted.
      */
+    @org.springframework.transaction.annotation.Transactional
     public void stopForDeletion(UUID projectId) {
+        projectLookupService.lockRuntime(projectId);
         ProjectLookupService.ProjectSummary project = projectLookupService.findById(projectId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Proyecto no encontrado: " + projectId));
         RuntimeInstance latestInstance = runtimeInstanceRepository
